@@ -1,13 +1,14 @@
 {
   "project_info": {
-    "project_number": "906307117922",
-    "project_id": "solardry-c3015",
-    "storage_bucket": "solardry-c3015.firebasestorage.app"
+    "project_number": "296900597500",
+    "firebase_url": "https://solar-e1840-default-rtdb.asia-southeast1.firebasedatabase.app",
+    "project_id": "solar-e1840",
+    "storage_bucket": "solar-e1840.firebasestorage.app"
   },
   "client": [
     {
       "client_info": {
-        "mobilesdk_app_id": "1:906307117922:android:feb481848999a1ad03023b",
+        "mobilesdk_app_id": "1:296900597500:android:e73dab2bf509867edea979",
         "android_client_info": {
           "package_name": "com.example.solardryy"
         }
@@ -15,7 +16,7 @@
       "oauth_client": [],
       "api_key": [
         {
-          "current_key": "AIzaSyDWlJKxDbm7sKGld6cOpLCb-GYoLd9FrWE"
+          "current_key": "AIzaSyC6RKP8_Aj2DlIu_A_5ewM2oB7FMvqYdSI"
         }
       ],
       "services": {

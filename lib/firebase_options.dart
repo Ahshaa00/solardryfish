@@ -50,21 +50,22 @@ class DefaultFirebaseOptions {
   }
 
   static const FirebaseOptions web = FirebaseOptions(
-    apiKey: 'AIzaSyBsVWC0dkeGmvejMpksdRZ72Sla5jaqdYI',
-    appId: '1:906307117922:web:fccb66240c278e1e03023b',
-    messagingSenderId: '906307117922',
-    projectId: 'solardry-c3015',
-    authDomain: 'solardry-c3015.firebaseapp.com',
-    storageBucket: 'solardry-c3015.firebasestorage.app',
-    measurementId: 'G-9XQZVTR6JV',
+    apiKey: 'AIzaSyAxqmaZPmGzXmkXrn8ef6EO8iRfDHy9vR4',
+    appId: '1:296900597500:web:4ae1389954166806dea979',
+    messagingSenderId: '296900597500',
+    projectId: 'solar-e1840',
+    authDomain: 'solar-e1840.firebaseapp.com',
+    databaseURL: 'https://solar-e1840-default-rtdb.asia-southeast1.firebasedatabase.app',
+    storageBucket: 'solar-e1840.firebasestorage.app',
   );
 
   static const FirebaseOptions android = FirebaseOptions(
-    apiKey: 'AIzaSyDWlJKxDbm7sKGld6cOpLCb-GYoLd9FrWE',
-    appId: '1:906307117922:android:feb481848999a1ad03023b',
-    messagingSenderId: '906307117922',
-    projectId: 'solardry-c3015',
-    storageBucket: 'solardry-c3015.firebasestorage.app',
+    apiKey: 'AIzaSyC6RKP8_Aj2DlIu_A_5ewM2oB7FMvqYdSI',
+    appId: '1:296900597500:android:e73dab2bf509867edea979',
+    messagingSenderId: '296900597500',
+    projectId: 'solar-e1840',
+    databaseURL: 'https://solar-e1840-default-rtdb.asia-southeast1.firebasedatabase.app',
+    storageBucket: 'solar-e1840.firebasestorage.app',
   );
 
 }
