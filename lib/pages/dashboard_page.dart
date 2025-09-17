@@ -1,9 +1,7 @@
-// dashboard_page.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'login_page.dart';
-import 'sensor_overview_page.dart';
 
 class DashboardPage extends StatefulWidget {
   const DashboardPage({super.key});
@@ -15,35 +13,16 @@ class DashboardPage extends StatefulWidget {
 class _DashboardPageState extends State<DashboardPage> {
   final dbRef = FirebaseDatabase.instance.ref();
 
-  double temperature = 0.0;
-  int rainLevel = 0;
   bool lidState = false;
   bool heaterState = false;
-
-  bool wifiConnected = false;
-  bool internetConnected = false;
-  bool firebaseConnected = false;
-  bool megaConnected = false;
+  double temperature = 0.0;
+  double humidity = 0.0;
+  double batteryLevel = 0.0;
+  bool isCharging = false;
 
   @override
   void initState() {
     super.initState();
-
-    dbRef.child('sensors/sht31_1/temp').onValue.listen((event) {
-      final temp = event.snapshot.value;
-      setState(() {
-        temperature = temp is double
-            ? temp
-            : double.tryParse(temp.toString()) ?? 0.0;
-      });
-    });
-
-    dbRef.child('sensors/rain/1').onValue.listen((event) {
-      final rain = event.snapshot.value;
-      setState(() {
-        rainLevel = rain is int ? rain : int.tryParse(rain.toString()) ?? 0;
-      });
-    });
 
     dbRef.child('controls/lid').onValue.listen((event) {
       setState(() {
@@ -57,27 +36,34 @@ class _DashboardPageState extends State<DashboardPage> {
       });
     });
 
-    dbRef.child('status/wifi').onValue.listen((event) {
+    dbRef.child('sensors/sht31_1/temp').onValue.listen((event) {
+      final temp = event.snapshot.value;
       setState(() {
-        wifiConnected = event.snapshot.value == true;
+        temperature = temp is double
+            ? temp
+            : double.tryParse(temp.toString()) ?? 0.0;
       });
     });
 
-    dbRef.child('status/internet').onValue.listen((event) {
+    dbRef.child('sensors/sht31_1/hum').onValue.listen((event) {
+      final hum = event.snapshot.value;
       setState(() {
-        internetConnected = event.snapshot.value == true;
+        humidity = hum is double ? hum : double.tryParse(hum.toString()) ?? 0.0;
       });
     });
 
-    dbRef.child('status/firebase').onValue.listen((event) {
+    dbRef.child('status/battery').onValue.listen((event) {
+      final battery = event.snapshot.value;
       setState(() {
-        firebaseConnected = event.snapshot.value == true;
+        batteryLevel = battery is double
+            ? battery
+            : double.tryParse(battery.toString()) ?? 0.0;
       });
     });
 
-    dbRef.child('status/mega').onValue.listen((event) {
+    dbRef.child('status/charging').onValue.listen((event) {
       setState(() {
-        megaConnected = event.snapshot.value == true;
+        isCharging = event.snapshot.value == true;
       });
     });
   }
@@ -90,56 +76,81 @@ class _DashboardPageState extends State<DashboardPage> {
     dbRef.child('controls/heater').set(heaterState ? "off" : "on");
   }
 
-  Widget statusTile(String label, bool status, IconData icon) {
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      child: ListTile(
-        leading: Icon(icon, color: status ? Colors.green : Colors.red),
-        title: Text(label),
-        trailing: Text(
-          status ? "Connected ✅" : "Disconnected ❌",
-          style: TextStyle(color: status ? Colors.green : Colors.red),
+  Widget sectionTitle(String title) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 12),
+      child: Text(
+        title,
+        style: const TextStyle(
+          fontSize: 18,
+          fontWeight: FontWeight.bold,
+          color: Colors.white,
         ),
       ),
     );
   }
 
-  Widget sensorTile(
-    String label,
-    String value,
-    IconData icon,
-    Color iconColor,
-  ) {
-    return Card(
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      child: ListTile(
-        leading: Icon(icon, color: iconColor),
-        title: Text(label),
-        trailing: Text(
-          value,
-          style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 18),
-        ),
+  Widget controlSwitch(String label, bool state, VoidCallback onToggle) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.symmetric(vertical: 6),
+      decoration: BoxDecoration(
+        color: Colors.amber,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Text(
+            label,
+            style: const TextStyle(
+              fontWeight: FontWeight.w600,
+              color: Colors.black,
+            ),
+          ),
+          Switch(
+            value: state,
+            onChanged: (_) => onToggle(),
+            activeColor: Colors.black,
+          ),
+        ],
       ),
     );
   }
 
-  Widget controlButton(
-    String label,
-    bool state,
-    IconData activeIcon,
-    IconData inactiveIcon,
-    VoidCallback onPressed,
-  ) {
-    return ElevatedButton.icon(
-      onPressed: onPressed,
-      icon: Icon(state ? activeIcon : inactiveIcon),
-      label: Text(state ? "Turn OFF $label" : "Turn ON $label"),
-      style: ElevatedButton.styleFrom(
-        backgroundColor: state ? Colors.red : Colors.green,
-        foregroundColor: Colors.white,
-        padding: const EdgeInsets.symmetric(vertical: 15),
-        minimumSize: const Size(double.infinity, 50),
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+  Widget statusBlock({required List<Widget> children}) {
+    return Container(
+      padding: const EdgeInsets.all(12),
+      margin: const EdgeInsets.symmetric(vertical: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1E2338),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: children,
+      ),
+    );
+  }
+
+  Widget statusRow(String label, String value, IconData icon, Color color) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 6),
+      child: Row(
+        children: [
+          Icon(icon, color: color),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Text(label, style: const TextStyle(color: Colors.white70)),
+          ),
+          Text(
+            value,
+            style: const TextStyle(
+              color: Colors.white,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+        ],
       ),
     );
   }
@@ -147,98 +158,126 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(
-        title: const Text('SolarDryFish Dashboard'),
-        backgroundColor: Colors.blue,
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout),
-            onPressed: () async {
-              await FirebaseAuth.instance.signOut();
-              if (mounted) {
-                Navigator.pushReplacement(
-                  context,
-                  MaterialPageRoute(builder: (_) => const LoginPage()),
-                );
-              }
-            },
-          ),
-        ],
+      drawer: Drawer(
+        backgroundColor: const Color(0xFF1E2338),
+        child: ListView(
+          children: [
+            const DrawerHeader(
+              child: Text(
+                "SolarDryFish",
+                style: TextStyle(color: Colors.white, fontSize: 22),
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.schedule, color: Colors.white),
+              title: const Text(
+                "Schedule Flip",
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () => Navigator.pushNamed(context, '/schedule'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.history, color: Colors.white),
+              title: const Text(
+                "Activity Log",
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () => Navigator.pushNamed(context, '/log'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.notifications, color: Colors.white),
+              title: const Text(
+                "Notifications",
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () => Navigator.pushNamed(context, '/notifications'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.sensors, color: Colors.white),
+              title: const Text(
+                "Monitor",
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () => Navigator.pushNamed(context, '/monitor'),
+            ),
+            Padding(
+              padding: const EdgeInsets.all(16.0),
+              child: ElevatedButton(
+                onPressed: () async {
+                  await FirebaseAuth.instance.signOut();
+                  if (context.mounted) {
+                    Navigator.pushReplacement(
+                      context,
+                      MaterialPageRoute(builder: (_) => const LoginPage()),
+                    );
+                  }
+                },
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber,
+                  foregroundColor: Colors.black,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                ),
+                child: const Text("Logout"),
+              ),
+            ),
+          ],
+        ),
       ),
+      appBar: AppBar(
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+        title: const Text("SolarDryFish"),
+      ),
+      backgroundColor: const Color(0xFF141829),
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: [
-          const Text(
-            "📡 Connection Status",
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 10),
-          statusTile("WiFi", wifiConnected, Icons.wifi),
-          statusTile("Internet", internetConnected, Icons.public),
-          statusTile("Firebase", firebaseConnected, Icons.fireplace),
-          statusTile("Mega", megaConnected, Icons.usb),
+          sectionTitle("Dashboard"),
+          controlSwitch("Lid Control", lidState, toggleLid),
+          controlSwitch("Air Heater Fan", heaterState, toggleHeater),
 
-          const SizedBox(height: 20),
-          const Text(
-            "🌡️ Sensors",
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 10),
-          sensorTile(
-            "SHT31 #1 Temp",
-            "${temperature.toStringAsFixed(1)} °C",
-            Icons.thermostat,
-            Colors.orange,
-          ),
-          sensorTile(
-            "Rain Sensor #1",
-            rainLevel > 0 ? "Activated ✅" : "Deactivated ❌",
-            Icons.water_drop,
-            rainLevel > 0 ? Colors.green : Colors.red,
-          ),
-
-          const SizedBox(height: 20),
-          const Text(
-            "⚙️ Controls",
-            style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
-          ),
-          const SizedBox(height: 10),
-          controlButton(
-            "Lid",
-            lidState,
-            Icons.lock,
-            Icons.lock_open,
-            toggleLid,
-          ),
-          const SizedBox(height: 10),
-          controlButton(
-            "Heater",
-            heaterState,
-            Icons.local_fire_department,
-            Icons.fireplace,
-            toggleHeater,
-          ),
-
-          const SizedBox(height: 20),
-          ElevatedButton.icon(
-            icon: const Icon(Icons.sensors),
-            label: const Text("View All Sensors"),
-            onPressed: () {
-              Navigator.push(
-                context,
-                MaterialPageRoute(
-                  builder: (context) => const SensorOverviewPage(),
-                ),
-              );
-            },
-            style: ElevatedButton.styleFrom(
-              backgroundColor: Colors.white,
-              foregroundColor: Colors.blue,
-              padding: const EdgeInsets.symmetric(vertical: 12),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(10),
+          sectionTitle("Drying Status"),
+          statusBlock(
+            children: [
+              statusRow(
+                "Temperature",
+                "${temperature.toStringAsFixed(1)}°",
+                Icons.thermostat,
+                Colors.orange,
               ),
-            ),
+              statusRow(
+                "Humidity",
+                "${humidity.toStringAsFixed(0)}%",
+                Icons.water_drop,
+                Colors.blue,
+              ),
+            ],
+          ),
+
+          sectionTitle("Machine Status"),
+          statusBlock(
+            children: [
+              statusRow(
+                "Battery",
+                "${batteryLevel.toStringAsFixed(0)}%",
+                Icons.battery_full,
+                batteryLevel > 50 ? Colors.green : Colors.red,
+              ),
+              statusRow(
+                "Charging",
+                isCharging ? "Charging" : "Not Charging",
+                Icons.power,
+                isCharging ? Colors.green : Colors.grey,
+              ),
+              statusRow(
+                "Lid Status",
+                lidState ? "Closed" : "Open",
+                Icons.door_front_door,
+                lidState ? Colors.green : Colors.orange,
+              ),
+            ],
           ),
         ],
       ),
