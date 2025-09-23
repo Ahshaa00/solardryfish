@@ -1,66 +1,118 @@
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'dashboard_page.dart';
+import 'system_selector_page.dart';
+import 'reset_password_page.dart';
 
 class CodeVerificationPage extends StatefulWidget {
   final String email;
-  const CodeVerificationPage({super.key, required this.email});
+  final bool isResetFlow;
+
+  const CodeVerificationPage({
+    super.key,
+    required this.email,
+    this.isResetFlow = false,
+  });
 
   @override
   State<CodeVerificationPage> createState() => _CodeVerificationPageState();
 }
 
 class _CodeVerificationPageState extends State<CodeVerificationPage> {
-  final linkController = TextEditingController();
+  final codeController = TextEditingController();
   bool loading = false;
 
-  Future<void> verifyEmailLink() async {
-    final email = widget.email;
-    final otpLink = linkController.text.trim();
+  Future<void> verifyOtp() async {
+    final enteredOtp = codeController.text.trim();
+    final email = widget.email.trim().toLowerCase();
 
-    if (!FirebaseAuth.instance.isSignInWithEmailLink(otpLink)) {
+    if (enteredOtp.isEmpty || enteredOtp.length != 4) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Invalid verification link")),
+        const SnackBar(content: Text("Please enter the 4-digit OTP")),
       );
       return;
     }
 
     setState(() => loading = true);
-    try {
-      await FirebaseAuth.instance.signInWithEmailLink(
-        email: email,
-        emailLink: otpLink,
-      );
 
-      // Retrieve password from Firestore
-      final doc = await FirebaseFirestore.instance
-          .collection('pending_registrations')
-          .doc(email)
-          .get();
-      if (!doc.exists) {
-        throw Exception("No pending registration found for this email.");
+    try {
+      final docRef = FirebaseFirestore.instance
+          .collection(
+            widget.isResetFlow ? 'password_resets' : 'pending_verifications',
+          )
+          .doc(email);
+
+      final doc = await docRef.get();
+      if (!doc.exists) throw "No OTP record found.";
+
+      final data = doc.data()!;
+      final correctOtp = data['otp'];
+      final password = data['password'];
+      final expiresAt = (data['expiresAt'] as Timestamp).toDate();
+
+      if (DateTime.now().isAfter(expiresAt)) {
+        await docRef.delete();
+        throw "OTP has expired. Please request a new one.";
       }
 
-      final password = doc['password'];
+      if (enteredOtp != correctOtp) throw "Incorrect OTP.";
 
-      // Create actual Firebase Auth account
-      await FirebaseAuth.instance.createUserWithEmailAndPassword(
-        email: email,
-        password: password,
-      );
+      // ✅ Registration Flow
+      if (!widget.isResetFlow) {
+        try {
+          await FirebaseAuth.instance.createUserWithEmailAndPassword(
+            email: email,
+            password: password,
+          );
 
-      // Clean up Firestore
-      await FirebaseFirestore.instance
-          .collection('pending_registrations')
-          .doc(email)
-          .delete();
+          await FirebaseAuth.instance.signInWithEmailAndPassword(
+            email: email,
+            password: password,
+          );
 
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const DashboardPage()),
+          await docRef.delete();
+
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text("Account created successfully.")),
+          );
+
+          if (mounted) {
+            Navigator.pushReplacement(
+              context,
+              MaterialPageRoute(builder: (_) => const SystemSelectorPage()),
+            );
+          }
+        } on FirebaseAuthException catch (e) {
+          if (e.code == 'email-already-in-use') {
+            await docRef.delete();
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text(
+                  "Email is already registered. Please log in or reset your password.",
+                ),
+              ),
+            );
+          } else {
+            rethrow; // other FirebaseAuth errors
+          }
+        }
+      }
+      // ✅ Forgot Password Flow
+      else {
+        await docRef.delete();
+
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text("OTP verified. Proceed to reset password."),
+          ),
         );
+
+        if (mounted) {
+          Navigator.pushReplacement(
+            context,
+            MaterialPageRoute(builder: (_) => ResetPasswordPage(email: email)),
+          );
+        }
       }
     } catch (e) {
       ScaffoldMessenger.of(
@@ -73,25 +125,30 @@ class _CodeVerificationPageState extends State<CodeVerificationPage> {
 
   @override
   Widget build(BuildContext context) {
+    final title = widget.isResetFlow ? "Reset Password" : "Verify Email";
+
     return Scaffold(
+      appBar: AppBar(title: Text(title)),
       body: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 30),
         child: Center(
           child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
+            mainAxisSize: MainAxisSize.min,
             children: [
-              const Text(
-                "SolarDryFish",
-                style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
+              Text(
+                widget.isResetFlow
+                    ? "Enter the OTP sent to your email to reset your password"
+                    : "Enter the OTP sent to your email to complete registration",
+                textAlign: TextAlign.center,
               ),
-              const SizedBox(height: 10),
-              const Text("Code Verification", style: TextStyle(fontSize: 22)),
-              const SizedBox(height: 30),
+              const SizedBox(height: 20),
               TextField(
-                controller: linkController,
+                controller: codeController,
+                keyboardType: TextInputType.number,
+                maxLength: 4,
                 decoration: const InputDecoration(
-                  labelText: "Paste verification link from email",
-                  prefixIcon: Icon(Icons.link),
+                  labelText: "OTP",
+                  prefixIcon: Icon(Icons.verified),
                   border: OutlineInputBorder(),
                 ),
               ),
@@ -99,13 +156,9 @@ class _CodeVerificationPageState extends State<CodeVerificationPage> {
               loading
                   ? const CircularProgressIndicator()
                   : ElevatedButton(
-                      onPressed: verifyEmailLink,
+                      onPressed: verifyOtp,
                       child: const Text("Verify"),
                     ),
-              TextButton(
-                onPressed: () => Navigator.pop(context),
-                child: const Text("Back to login"),
-              ),
             ],
           ),
         ),

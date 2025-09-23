@@ -2,84 +2,63 @@ import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
 
 class NotificationsPage extends StatefulWidget {
-  const NotificationsPage({super.key});
+  final String systemId;
+  const NotificationsPage({required this.systemId, super.key});
 
   @override
   State<NotificationsPage> createState() => _NotificationsPageState();
 }
 
 class _NotificationsPageState extends State<NotificationsPage> {
-  final dbRef = FirebaseDatabase.instance.ref();
-  List<String> allNotifications = [];
-  int currentPage = 0;
-  final int pageSize = 5;
+  late final DatabaseReference notifRef;
+  List<String> notifications = [];
 
   @override
   void initState() {
     super.initState();
-    dbRef.child('notifications').onValue.listen((event) {
-      final data = event.snapshot.value as List?;
-      if (data != null) {
+    notifRef = FirebaseDatabase.instance.ref(
+      'hardwareSystems/${widget.systemId}/notifications',
+    );
+
+    notifRef.onValue.listen((event) {
+      final snapshot = event.snapshot.value;
+      if (snapshot is List) {
         setState(() {
-          allNotifications = data.reversed.map((e) => e.toString()).toList();
+          notifications = snapshot.reversed.map((e) => e.toString()).toList();
+        });
+      } else if (snapshot is Map) {
+        final entries = snapshot.entries.map((e) {
+          final value = e.value;
+          if (value is Map && value['message'] != null) {
+            return value['message'].toString();
+          }
+          return value.toString();
+        }).toList();
+        setState(() {
+          notifications = entries.reversed.toList();
         });
       }
     });
-  }
-
-  List<String> get paginatedNotifications {
-    final start = currentPage * pageSize;
-    final end = start + pageSize;
-    return allNotifications.sublist(
-      start,
-      end > allNotifications.length ? allNotifications.length : end,
-    );
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Notifications")),
-      body: Column(
-        children: [
-          Expanded(
-            child: ListView.builder(
-              itemCount: paginatedNotifications.length,
-              itemBuilder: (context, index) => Card(
-                margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                child: ListTile(
-                  leading: const Icon(
-                    Icons.notification_important,
-                    color: Colors.orange,
-                  ),
-                  title: Text(paginatedNotifications[index]),
-                ),
-              ),
+      backgroundColor: const Color(0xFF141829),
+      body: ListView.builder(
+        itemCount: notifications.length,
+        itemBuilder: (context, index) => Card(
+          color: const Color(0xFF1E2338),
+          margin: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+          child: ListTile(
+            leading: const Icon(Icons.notifications, color: Colors.amber),
+            title: Text(
+              notifications[index],
+              style: const TextStyle(color: Colors.white),
             ),
           ),
-          if (allNotifications.length > pageSize)
-            Padding(
-              padding: const EdgeInsets.all(8),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                children: [
-                  ElevatedButton(
-                    onPressed: currentPage > 0
-                        ? () => setState(() => currentPage--)
-                        : null,
-                    child: const Text("Previous"),
-                  ),
-                  ElevatedButton(
-                    onPressed:
-                        (currentPage + 1) * pageSize < allNotifications.length
-                        ? () => setState(() => currentPage++)
-                        : null,
-                    child: const Text("Next"),
-                  ),
-                ],
-              ),
-            ),
-        ],
+        ),
       ),
     );
   }

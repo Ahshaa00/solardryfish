@@ -3,16 +3,16 @@ import 'package:firebase_database/firebase_database.dart';
 import 'package:intl/intl.dart';
 
 class SystemMonitorPage extends StatefulWidget {
-  const SystemMonitorPage({super.key});
+  final String systemId;
+  const SystemMonitorPage({required this.systemId, super.key});
 
   @override
   State<SystemMonitorPage> createState() => _SystemMonitorPageState();
 }
 
 class _SystemMonitorPageState extends State<SystemMonitorPage> {
-  final dbRef = FirebaseDatabase.instance.ref();
+  late final DatabaseReference systemRef;
 
-  // --- Sensors
   Map<String, dynamic> shtData = {
     "sht31_1": {},
     "sht31_2": {},
@@ -22,11 +22,9 @@ class _SystemMonitorPageState extends State<SystemMonitorPage> {
   Map<String, dynamic> rainData = {};
   Map<String, dynamic> lightData = {};
 
-  // --- Controls
   bool lidState = false;
   bool heaterState = false;
 
-  // --- Status
   double batteryLevel = 0.0;
   bool isCharging = false;
   bool wifiConnected = false;
@@ -37,25 +35,25 @@ class _SystemMonitorPageState extends State<SystemMonitorPage> {
   @override
   void initState() {
     super.initState();
+    systemRef = FirebaseDatabase.instance.ref(
+      'hardwareSystems/${widget.systemId}',
+    );
     fetchSensorData();
 
-    // Realtime listener for sensors
-    dbRef.child('sensors').onValue.listen((event) {
+    systemRef.child('sensors').onValue.listen((event) {
       final data = event.snapshot.value as Map?;
       if (data != null) parseSensorData(data);
     });
 
-    // Controls
-    dbRef.child('controls/lid').onValue.listen((event) {
+    systemRef.child('controls/lid').onValue.listen((event) {
       setState(() => lidState = event.snapshot.value == "open");
     });
 
-    dbRef.child('controls/heater').onValue.listen((event) {
+    systemRef.child('controls/heater').onValue.listen((event) {
       setState(() => heaterState = event.snapshot.value == "on");
     });
 
-    // Status
-    dbRef.child('status/battery').onValue.listen((event) {
+    systemRef.child('status/battery').onValue.listen((event) {
       final battery = event.snapshot.value;
       setState(() {
         batteryLevel = battery is double
@@ -64,29 +62,29 @@ class _SystemMonitorPageState extends State<SystemMonitorPage> {
       });
     });
 
-    dbRef.child('status/charging').onValue.listen((event) {
+    systemRef.child('status/charging').onValue.listen((event) {
       setState(() => isCharging = event.snapshot.value == true);
     });
 
-    dbRef.child('status/wifi').onValue.listen((event) {
+    systemRef.child('status/wifi').onValue.listen((event) {
       setState(() => wifiConnected = event.snapshot.value == true);
     });
 
-    dbRef.child('status/internet').onValue.listen((event) {
+    systemRef.child('status/internet').onValue.listen((event) {
       setState(() => internetConnected = event.snapshot.value == true);
     });
 
-    dbRef.child('status/firebase').onValue.listen((event) {
+    systemRef.child('status/firebase').onValue.listen((event) {
       setState(() => firebaseConnected = event.snapshot.value == true);
     });
 
-    dbRef.child('status/mega').onValue.listen((event) {
+    systemRef.child('status/mega').onValue.listen((event) {
       setState(() => megaConnected = event.snapshot.value == true);
     });
   }
 
   Future<void> fetchSensorData() async {
-    final snapshot = await dbRef.child('sensors').get();
+    final snapshot = await systemRef.child('sensors').get();
     final data = snapshot.value as Map?;
     if (data != null) parseSensorData(data);
   }
@@ -113,7 +111,6 @@ class _SystemMonitorPageState extends State<SystemMonitorPage> {
     });
   }
 
-  // --- Widgets ---
   Widget statusCard(String label, bool status, IconData icon) {
     return Card(
       margin: const EdgeInsets.symmetric(vertical: 8),
@@ -228,7 +225,6 @@ class _SystemMonitorPageState extends State<SystemMonitorPage> {
         child: ListView(
           padding: const EdgeInsets.all(16),
           children: [
-            // 🌡️ Temperature & Humidity (expanded by default)
             ExpansionTile(
               initiallyExpanded: true,
               collapsedBackgroundColor: const Color(0xFF1E2338),
@@ -244,7 +240,6 @@ class _SystemMonitorPageState extends State<SystemMonitorPage> {
                 buildSHTSensor("sht31_4"),
               ],
             ),
-
             const SizedBox(height: 8),
             ExpansionTile(
               collapsedBackgroundColor: const Color(0xFF1E2338),
@@ -258,7 +253,6 @@ class _SystemMonitorPageState extends State<SystemMonitorPage> {
                 (i) => buildAnalogSensor(rainData, i + 1, 'rain'),
               ),
             ),
-
             const SizedBox(height: 8),
             ExpansionTile(
               collapsedBackgroundColor: const Color(0xFF1E2338),
@@ -272,7 +266,6 @@ class _SystemMonitorPageState extends State<SystemMonitorPage> {
                 (i) => buildAnalogSensor(lightData, i + 1, 'light'),
               ),
             ),
-
             const SizedBox(height: 8),
             ExpansionTile(
               collapsedBackgroundColor: const Color(0xFF1E2338),
@@ -308,7 +301,6 @@ class _SystemMonitorPageState extends State<SystemMonitorPage> {
                 ),
               ],
             ),
-
             const SizedBox(height: 8),
             ExpansionTile(
               collapsedBackgroundColor: const Color(0xFF1E2338),

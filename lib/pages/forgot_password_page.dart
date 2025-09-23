@@ -1,5 +1,8 @@
+import 'dart:math';
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
 import 'code_verification_page.dart';
 
 class ForgotPasswordPage extends StatefulWidget {
@@ -13,25 +16,78 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
   final emailController = TextEditingController();
   bool loading = false;
 
-  Future<void> sendResetEmail() async {
-    setState(() => loading = true);
-    try {
-      await FirebaseAuth.instance.sendPasswordResetEmail(
-        email: emailController.text.trim(),
+  Future<void> sendOtpEmail(String email, String otp) async {
+    const serviceId = 'service_lhe1js8';
+    const templateId = 'template_4a79q0s';
+    const userId = 'FzZRICSPDyIAFC1Tt';
+
+    final url = Uri.parse('https://api.emailjs.com/api/v1.0/email/send');
+    final response = await http.post(
+      url,
+      headers: {
+        'origin': 'http://localhost',
+        'Content-Type': 'application/json',
+      },
+      body: json.encode({
+        'service_id': serviceId,
+        'template_id': templateId,
+        'user_id': userId,
+        'template_params': {'to_email': email, 'otp': otp},
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw "EmailJS failed: ${response.body}";
+    }
+  }
+
+  Future<void> sendResetOtp() async {
+    final email = emailController.text.trim().toLowerCase();
+    final originalPassword = 'Admin123'; // Replace with secure logic if needed
+
+    if (email.isEmpty || !email.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter a valid email")),
       );
+      return;
+    }
+
+    setState(() => loading = true);
+
+    try {
+      final otp = (1000 + Random().nextInt(9000)).toString();
+      final expiresAt = DateTime.now().add(const Duration(minutes: 5));
+
+      await FirebaseFirestore.instance
+          .collection('password_resets')
+          .doc(email)
+          .set({
+            'email': email,
+            'otp': otp,
+            'password': originalPassword,
+            'timestamp': FieldValue.serverTimestamp(),
+            'expiresAt': Timestamp.fromDate(expiresAt),
+          });
+
+      await sendOtpEmail(email, otp);
+
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("OTP sent to $email")));
+
       if (mounted) {
         Navigator.push(
           context,
           MaterialPageRoute(
             builder: (_) =>
-                CodeVerificationPage(email: emailController.text.trim()),
+                CodeVerificationPage(email: email, isResetFlow: true),
           ),
         );
       }
     } catch (e) {
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text("Error: $e")));
+      ).showSnackBar(SnackBar(content: Text("Failed to send OTP: $e")));
     } finally {
       setState(() => loading = false);
     }
@@ -55,6 +111,7 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 const SizedBox(height: 30),
                 TextField(
                   controller: emailController,
+                  keyboardType: TextInputType.emailAddress,
                   decoration: const InputDecoration(
                     labelText: "Email",
                     prefixIcon: Icon(Icons.email),
@@ -65,8 +122,8 @@ class _ForgotPasswordPageState extends State<ForgotPasswordPage> {
                 loading
                     ? const CircularProgressIndicator()
                     : ElevatedButton(
-                        onPressed: sendResetEmail,
-                        child: const Text("Send"),
+                        onPressed: sendResetOtp,
+                        child: const Text("Send OTP"),
                       ),
                 TextButton(
                   onPressed: () => Navigator.pop(context),

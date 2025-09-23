@@ -4,14 +4,15 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'login_page.dart';
 
 class DashboardPage extends StatefulWidget {
-  const DashboardPage({super.key});
+  final String systemId;
+  const DashboardPage({required this.systemId, super.key});
 
   @override
   State<DashboardPage> createState() => _DashboardPageState();
 }
 
 class _DashboardPageState extends State<DashboardPage> {
-  final dbRef = FirebaseDatabase.instance.ref();
+  late final DatabaseReference systemRef;
 
   bool lidState = false;
   bool heaterState = false;
@@ -23,20 +24,23 @@ class _DashboardPageState extends State<DashboardPage> {
   @override
   void initState() {
     super.initState();
+    systemRef = FirebaseDatabase.instance.ref(
+      'hardwareSystems/${widget.systemId}',
+    );
 
-    dbRef.child('controls/lid').onValue.listen((event) {
+    systemRef.child('controls/lid').onValue.listen((event) {
       setState(() {
         lidState = event.snapshot.value == "open";
       });
     });
 
-    dbRef.child('controls/heater').onValue.listen((event) {
+    systemRef.child('controls/heater').onValue.listen((event) {
       setState(() {
         heaterState = event.snapshot.value == "on";
       });
     });
 
-    dbRef.child('sensors/sht31_1/temp').onValue.listen((event) {
+    systemRef.child('sensors/sht31_1/temp').onValue.listen((event) {
       final temp = event.snapshot.value;
       setState(() {
         temperature = temp is double
@@ -45,14 +49,14 @@ class _DashboardPageState extends State<DashboardPage> {
       });
     });
 
-    dbRef.child('sensors/sht31_1/hum').onValue.listen((event) {
+    systemRef.child('sensors/sht31_1/hum').onValue.listen((event) {
       final hum = event.snapshot.value;
       setState(() {
         humidity = hum is double ? hum : double.tryParse(hum.toString()) ?? 0.0;
       });
     });
 
-    dbRef.child('status/battery').onValue.listen((event) {
+    systemRef.child('status/battery').onValue.listen((event) {
       final battery = event.snapshot.value;
       setState(() {
         batteryLevel = battery is double
@@ -61,7 +65,7 @@ class _DashboardPageState extends State<DashboardPage> {
       });
     });
 
-    dbRef.child('status/charging').onValue.listen((event) {
+    systemRef.child('status/charging').onValue.listen((event) {
       setState(() {
         isCharging = event.snapshot.value == true;
       });
@@ -69,11 +73,13 @@ class _DashboardPageState extends State<DashboardPage> {
   }
 
   void toggleLid() {
-    dbRef.child('controls/lid').set(lidState ? "close" : "open");
+    final newState = lidState ? "close" : "open";
+    systemRef.child('controls/lid').set(newState);
   }
 
   void toggleHeater() {
-    dbRef.child('controls/heater').set(heaterState ? "off" : "on");
+    final newState = heaterState ? "off" : "on";
+    systemRef.child('controls/heater').set(newState);
   }
 
   Widget sectionTitle(String title) {
@@ -111,7 +117,7 @@ class _DashboardPageState extends State<DashboardPage> {
           Switch(
             value: state,
             onChanged: (_) => onToggle(),
-            activeColor: Colors.black,
+            activeThumbColor: Colors.black,
           ),
         ],
       ),
@@ -162,10 +168,33 @@ class _DashboardPageState extends State<DashboardPage> {
         backgroundColor: const Color(0xFF1E2338),
         child: ListView(
           children: [
-            const DrawerHeader(
-              child: Text(
-                "SolarDryFish",
-                style: TextStyle(color: Colors.white, fontSize: 22),
+            DrawerHeader(
+              decoration: const BoxDecoration(color: Colors.amber),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "SolarDryFish",
+                    style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    "System ID: ${widget.systemId}",
+                    style: const TextStyle(fontSize: 16),
+                  ),
+                ],
+              ),
+            ),
+            ListTile(
+              leading: const Icon(Icons.schedule, color: Colors.white),
+              title: const Text(
+                "Account",
+                style: TextStyle(color: Colors.white),
+              ),
+              onTap: () => Navigator.pushNamed(
+                context,
+                '/schedule',
+                arguments: widget.systemId,
               ),
             ),
             ListTile(
@@ -174,7 +203,11 @@ class _DashboardPageState extends State<DashboardPage> {
                 "Schedule Flip",
                 style: TextStyle(color: Colors.white),
               ),
-              onTap: () => Navigator.pushNamed(context, '/schedule'),
+              onTap: () => Navigator.pushNamed(
+                context,
+                '/schedule',
+                arguments: widget.systemId,
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.history, color: Colors.white),
@@ -182,7 +215,11 @@ class _DashboardPageState extends State<DashboardPage> {
                 "Activity Log",
                 style: TextStyle(color: Colors.white),
               ),
-              onTap: () => Navigator.pushNamed(context, '/log'),
+              onTap: () => Navigator.pushNamed(
+                context,
+                '/log',
+                arguments: widget.systemId,
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.notifications, color: Colors.white),
@@ -190,7 +227,11 @@ class _DashboardPageState extends State<DashboardPage> {
                 "Notifications",
                 style: TextStyle(color: Colors.white),
               ),
-              onTap: () => Navigator.pushNamed(context, '/notifications'),
+              onTap: () => Navigator.pushNamed(
+                context,
+                '/notifications',
+                arguments: widget.systemId,
+              ),
             ),
             ListTile(
               leading: const Icon(Icons.sensors, color: Colors.white),
@@ -198,7 +239,11 @@ class _DashboardPageState extends State<DashboardPage> {
                 "Monitor",
                 style: TextStyle(color: Colors.white),
               ),
-              onTap: () => Navigator.pushNamed(context, '/monitor'),
+              onTap: () => Navigator.pushNamed(
+                context,
+                '/monitor',
+                arguments: widget.systemId,
+              ),
             ),
             Padding(
               padding: const EdgeInsets.all(16.0),
@@ -237,7 +282,6 @@ class _DashboardPageState extends State<DashboardPage> {
           sectionTitle("Dashboard"),
           controlSwitch("Lid Control", lidState, toggleLid),
           controlSwitch("Air Heater Fan", heaterState, toggleHeater),
-
           sectionTitle("Drying Status"),
           statusBlock(
             children: [
@@ -255,7 +299,6 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
             ],
           ),
-
           sectionTitle("Machine Status"),
           statusBlock(
             children: [

@@ -12,6 +12,7 @@ import 'pages/system_monitor_page.dart';
 import 'pages/schedule_flip_page.dart';
 import 'pages/activity_log_page.dart';
 import 'pages/notifications_page.dart';
+import 'pages/system_selector_page.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -42,13 +43,38 @@ class MyApp extends StatelessWidget {
         ),
       ),
       home: const SplashScreen(),
-      routes: {
-        '/dashboard': (context) => const DashboardPage(),
-        '/schedule': (context) => const ScheduleFlipPage(),
-        '/log': (context) => const ActivityLogPage(),
-        '/notifications': (context) => const NotificationsPage(),
-        '/monitor': (context) => const SystemMonitorPage(),
-        '/register': (context) => const RegisterPage(),
+      onGenerateRoute: (settings) {
+        final systemId = settings.arguments as String?;
+        if (systemId == null) {
+          return MaterialPageRoute(builder: (_) => const SystemSelectorPage());
+        }
+
+        switch (settings.name) {
+          case '/dashboard':
+            return MaterialPageRoute(
+              builder: (_) => DashboardPage(systemId: systemId),
+            );
+          case '/schedule':
+            return MaterialPageRoute(
+              builder: (_) => ScheduleFlipPage(systemId: systemId),
+            );
+          case '/log':
+            return MaterialPageRoute(
+              builder: (_) => ActivityLogPage(systemId: systemId),
+            );
+          case '/notifications':
+            return MaterialPageRoute(
+              builder: (_) => NotificationsPage(systemId: systemId),
+            );
+          case '/monitor':
+            return MaterialPageRoute(
+              builder: (_) => SystemMonitorPage(systemId: systemId),
+            );
+          case '/register':
+            return MaterialPageRoute(builder: (_) => const RegisterPage());
+          default:
+            return MaterialPageRoute(builder: (_) => const SplashScreen());
+        }
       },
     );
   }
@@ -88,12 +114,12 @@ class _SplashScreenState extends State<SplashScreen>
         checking = false;
       });
     } else {
-      await showNoInternetDialog(); // Wait for user response
+      await showNoInternetDialog();
       setState(() {
         isConnected = false;
-        checking = true; // Retry state
+        checking = true;
       });
-      checkConnectivity(); // Retry after dialog
+      checkConnectivity();
     }
   }
 
@@ -194,7 +220,7 @@ class _SplashScreenState extends State<SplashScreen>
                     },
                     child: const Text("Get Started"),
                   )
-                : const SizedBox.shrink(), // Prevents button when offline
+                : const SizedBox.shrink(),
           ],
         ),
       ),
@@ -214,7 +240,7 @@ class AuthWrapper extends StatelessWidget {
           return const SplashScreen();
         }
         if (snapshot.hasData) {
-          return const DashboardPage();
+          return const SystemSelectorPage(); // ✅ Now prompts for systemId
         }
         return const LoginPage();
       },

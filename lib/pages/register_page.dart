@@ -1,5 +1,8 @@
+import 'dart:math';
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
+import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'code_verification_page.dart';
 
@@ -13,60 +16,89 @@ class RegisterPage extends StatefulWidget {
 class _RegisterPageState extends State<RegisterPage> {
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
-  final confirmController = TextEditingController();
   bool loading = false;
   bool showPassword = false;
 
-  Future<void> register() async {
-    final email = emailController.text.trim();
-    final password = passwordController.text.trim();
-    final confirm = confirmController.text.trim();
+  Future<void> sendOtpEmail(String email, String otp) async {
+    const serviceId = 'service_lhe1js8';
+    const templateId = 'template_4a79q0s';
+    const userId = 'FzZRICSPDyIAFC1Tt';
 
-    if (password != confirm) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Passwords do not match")));
+    final url = Uri.parse('https://api.emailjs.com/api/v1.0/email/send');
+    final response = await http.post(
+      url,
+      headers: {
+        'origin': 'http://localhost',
+        'Content-Type': 'application/json',
+      },
+      body: json.encode({
+        'service_id': serviceId,
+        'template_id': templateId,
+        'user_id': userId,
+        'template_params': {'to_email': email, 'otp': otp},
+      }),
+    );
+
+    if (response.statusCode != 200) {
+      throw "EmailJS failed: ${response.body}";
+    }
+  }
+
+  Future<void> startRegistration() async {
+    final email = emailController.text.trim().toLowerCase();
+    final password = passwordController.text.trim();
+
+    if (email.isEmpty || password.isEmpty || !email.contains('@')) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter valid credentials")),
+      );
       return;
     }
 
     setState(() => loading = true);
+
     try {
-      // Save to Firestore temporarily
+      // ✅ Generate OTP and save to Firestore
+      final otp = (1000 + Random().nextInt(9000)).toString();
+      final expiresAt = DateTime.now().add(const Duration(minutes: 5));
+
       await FirebaseFirestore.instance
-          .collection('pending_registrations')
+          .collection('pending_verifications')
           .doc(email)
           .set({
             'email': email,
+            'otp': otp,
             'password': password,
             'timestamp': FieldValue.serverTimestamp(),
+            'expiresAt': Timestamp.fromDate(expiresAt),
           });
 
-      // Send OTP link
-      final actionCodeSettings = ActionCodeSettings(
-        url: 'https://solardryfish.com/verify?email=$email',
-        handleCodeInApp: true,
-        iOSBundleId: 'com.solardryfish.app',
-        androidPackageName: 'com.solardryfish.app',
-        androidInstallApp: true,
-        androidMinimumVersion: '21',
-      );
+      // ✅ Send OTP via EmailJS
+      await sendOtpEmail(email, otp);
 
-      await FirebaseAuth.instance.sendSignInLinkToEmail(
-        email: email,
-        actionCodeSettings: actionCodeSettings,
-      );
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(
-          content: Text("OTP link sent. Please check your email."),
-        ),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text("OTP sent to $email")));
 
       if (mounted) {
-        Navigator.pushReplacement(
+        Navigator.push(
           context,
           MaterialPageRoute(builder: (_) => CodeVerificationPage(email: email)),
         );
+      }
+    } on FirebaseAuthException catch (e) {
+      if (e.code == 'email-already-in-use') {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text(
+              "Email is already registered. Please log in or reset your password.",
+            ),
+          ),
+        );
+      } else {
+        ScaffoldMessenger.of(
+          context,
+        ).showSnackBar(SnackBar(content: Text("Firebase error: ${e.message}")));
       }
     } catch (e) {
       ScaffoldMessenger.of(
@@ -91,10 +123,11 @@ class _RegisterPageState extends State<RegisterPage> {
                   style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 10),
-                const Text("Sign Up", style: TextStyle(fontSize: 22)),
+                const Text("Register", style: TextStyle(fontSize: 22)),
                 const SizedBox(height: 30),
                 TextField(
                   controller: emailController,
+                  keyboardType: TextInputType.emailAddress,
                   decoration: const InputDecoration(
                     labelText: "Email",
                     prefixIcon: Icon(Icons.email),
@@ -107,6 +140,7 @@ class _RegisterPageState extends State<RegisterPage> {
                   obscureText: !showPassword,
                   decoration: InputDecoration(
                     labelText: "Password",
+                    border: const OutlineInputBorder(),
                     prefixIcon: const Icon(Icons.lock),
                     suffixIcon: IconButton(
                       icon: Icon(
@@ -115,30 +149,18 @@ class _RegisterPageState extends State<RegisterPage> {
                       onPressed: () =>
                           setState(() => showPassword = !showPassword),
                     ),
-                    border: const OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 15),
-                TextField(
-                  controller: confirmController,
-                  obscureText: !showPassword,
-                  decoration: const InputDecoration(
-                    labelText: "Confirm Password",
-                    prefixIcon: Icon(Icons.lock_outline),
-                    border: OutlineInputBorder(),
                   ),
                 ),
                 const SizedBox(height: 20),
                 loading
                     ? const CircularProgressIndicator()
                     : ElevatedButton(
-                        onPressed: register,
-                        child: const Text("Sign Up"),
+                        onPressed: startRegistration,
+                        child: const Text("Register"),
                       ),
-                const SizedBox(height: 10),
                 TextButton(
                   onPressed: () => Navigator.pop(context),
-                  child: const Text("Already have an account? Login"),
+                  child: const Text("Back to login"),
                 ),
               ],
             ),

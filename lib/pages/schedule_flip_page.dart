@@ -1,16 +1,21 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:firebase_database/firebase_database.dart';
+import '../services/schedule_service.dart';
+import '../services/automation_service.dart';
 
 class ScheduleFlipPage extends StatefulWidget {
-  const ScheduleFlipPage({super.key});
+  final String systemId;
+  const ScheduleFlipPage({required this.systemId, super.key});
 
   @override
   State<ScheduleFlipPage> createState() => _ScheduleFlipPageState();
 }
 
 class _ScheduleFlipPageState extends State<ScheduleFlipPage> {
-  final dbRef = FirebaseDatabase.instance.ref();
+  late final DatabaseReference systemRef;
+  late final ScheduleService scheduleService;
+  late final AutomationService automationService;
 
   int phase1Duration = 3600;
   int phase2Duration = 1800;
@@ -39,59 +44,36 @@ class _ScheduleFlipPageState extends State<ScheduleFlipPage> {
   @override
   void initState() {
     super.initState();
-    _listenToSchedule();
-    _listenToControls();
-  }
+    systemRef = FirebaseDatabase.instance.ref(
+      'hardwareSystems/${widget.systemId}',
+    );
+    scheduleService = ScheduleService(systemRef);
+    automationService = AutomationService(systemRef);
 
-  void _listenToSchedule() {
-    dbRef.child('schedule/remaining').onValue.listen((event) {
-      final val = event.snapshot.value;
-      final seconds = val is int ? val : int.tryParse(val.toString()) ?? 0;
-      setState(() {
-        remainingSeconds = seconds;
-        isBatchActive = seconds > 0;
-      });
-      _startCountdown();
-    });
-
-    dbRef.child('schedule/phase').onValue.listen((event) {
-      setState(() {
-        currentPhase = event.snapshot.value?.toString() ?? 'Phase 1';
-      });
-    });
-
-    dbRef.child('schedule/batchCount').onValue.listen((event) {
-      final val = event.snapshot.value;
-      setState(() {
-        batchCount = val is int ? val : int.tryParse(val.toString()) ?? 0;
-      });
-    });
-
-    dbRef.child('schedule/targets').onValue.listen((event) {
-      final data = event.snapshot.value as Map?;
-      if (data != null) {
+    scheduleService.listenToSchedule(
+      onRemainingUpdate: (seconds) {
         setState(() {
-          targetTemp = double.tryParse(data['temp'].toString()) ?? 35.0;
-          targetHum = double.tryParse(data['hum'].toString()) ?? 50.0;
-          tempController.text = targetTemp.toString();
-          humController.text = targetHum.toString();
+          remainingSeconds = seconds;
+          isBatchActive = seconds > 0;
         });
-      }
-    });
-  }
+        _startCountdown();
+      },
+      onPhaseUpdate: (phase) => setState(() => currentPhase = phase),
+      onBatchUpdate: (count) => setState(() => batchCount = count),
+      onTargetUpdate: (temp, hum) {
+        setState(() {
+          targetTemp = temp;
+          targetHum = hum;
+          tempController.text = temp.toString();
+          humController.text = hum.toString();
+        });
+      },
+    );
 
-  void _listenToControls() {
-    dbRef.child('controls/lid').onValue.listen((event) {
-      setState(() {
-        lidOpen = event.snapshot.value == "open";
-      });
-    });
-
-    dbRef.child('controls/heater').onValue.listen((event) {
-      setState(() {
-        heaterOn = event.snapshot.value == "on";
-      });
-    });
+    scheduleService.listenToControls(
+      onLidUpdate: (open) => setState(() => lidOpen = open),
+      onHeaterUpdate: (on) => setState(() => heaterOn = on),
+    );
   }
 
   void _startCountdown() {
@@ -102,10 +84,8 @@ class _ScheduleFlipPageState extends State<ScheduleFlipPage> {
           timer.cancel();
           _handlePhaseTransition();
         } else {
-          setState(() {
-            remainingSeconds--;
-          });
-          dbRef.child('schedule/remaining').set(remainingSeconds);
+          setState(() => remainingSeconds--);
+          systemRef.child('schedule/remaining').set(remainingSeconds);
         }
       });
     }
@@ -113,16 +93,16 @@ class _ScheduleFlipPageState extends State<ScheduleFlipPage> {
 
   void _handlePhaseTransition() {
     if (currentPhase == 'Phase 1') {
-      dbRef.child('schedule').update({
+      systemRef.child('schedule').update({
         'phase': 'Phase 2',
         'remaining': phase2Duration,
       });
-      _log("Auto-switched to Phase 2");
-      _notify("Drying session flipped to Phase 2");
+      scheduleService.log("Auto-switched to Phase 2");
+      scheduleService.notify("Drying session flipped to Phase 2");
     } else {
-      dbRef.child('schedule/remaining').set(0);
-      _log("Drying session completed");
-      _notify("Drying session completed");
+      systemRef.child('schedule/remaining').set(0);
+      scheduleService.log("Drying session completed");
+      scheduleService.notify("Drying session completed");
     }
   }
 
@@ -140,75 +120,57 @@ class _ScheduleFlipPageState extends State<ScheduleFlipPage> {
     final temp = double.tryParse(tempController.text) ?? targetTemp;
     final hum = double.tryParse(humController.text) ?? targetHum;
 
-    dbRef.child('schedule').update({
-      'remaining': phase1Duration,
-      'phase': 'Phase 1',
-      'batchCount': batchCount + 1,
-      'phaseDurations': {'phase1': phase1Duration, 'phase2': phase2Duration},
-      'targets': {'temp': temp, 'hum': hum},
-    });
+    scheduleService.updateSchedule(
+      phase1Duration: phase1Duration,
+      phase2Duration: phase2Duration,
+      batchCount: batchCount,
+      temp: temp,
+      hum: hum,
+    );
 
-    _log(
+    scheduleService.log(
       "Scheduled new batch with Phase 1: $phase1Duration sec, Phase 2: $phase2Duration sec, Temp: $temp°C, Humidity: $hum%",
     );
-    _notify("New drying batch scheduled");
+    scheduleService.notify("New drying batch scheduled");
   }
 
   void stopDryingSession() {
     countdownTimer?.cancel();
-    dbRef.child('schedule').update({'remaining': 0, 'phase': 'Phase 1'});
-    _log("Drying session manually stopped");
-    _notify("Drying session stopped");
+    systemRef.child('schedule').update({'remaining': 0, 'phase': 'Phase 1'});
+    scheduleService.log("Drying session manually stopped");
+    scheduleService.notify("Drying session stopped");
   }
 
   void toggleLid() {
     final newState = lidOpen ? "close" : "open";
-    dbRef.child('controls/lid').set(newState);
-    _log("Lid toggled to $newState");
-    _notify("Lid is now $newState");
+    scheduleService.toggleControl("lid", newState);
+    scheduleService.log("Lid toggled to $newState");
+    scheduleService.notify("Lid is now $newState");
   }
 
   void toggleHeater() {
     final newState = heaterOn ? "off" : "on";
-    dbRef.child('controls/heater').set(newState);
-    _log("Heater toggled to $newState");
-    _notify("Heater is now $newState");
+    scheduleService.toggleControl("heater", newState);
+    scheduleService.log("Heater toggled to $newState");
+    scheduleService.notify("Heater is now $newState");
   }
 
   void triggerFlip() {
-    dbRef.child('controls/flip').set("flipping");
-    _log("Flip triggered");
+    scheduleService.toggleControl("flip", "flipping");
+    scheduleService.log("Flip triggered");
 
     if (currentPhase == 'Phase 1') {
-      dbRef.child('schedule').update({
+      systemRef.child('schedule').update({
         'phase': 'Phase 2',
         'remaining': phase2Duration,
       });
-      _log("Manually flipped to Phase 2");
-      _notify("Manually flipped to Phase 2");
+      scheduleService.log("Manually flipped to Phase 2");
+      scheduleService.notify("Manually flipped to Phase 2");
     } else {
-      dbRef.child('schedule/remaining').set(0);
-      _log("Drying session ended after Phase 2");
-      _notify("Drying session ended");
+      systemRef.child('schedule/remaining').set(0);
+      scheduleService.log("Drying session ended after Phase 2");
+      scheduleService.notify("Drying session ended");
     }
-  }
-
-  void _log(String message) {
-    final ref = dbRef.child('logs');
-    ref.once().then((snapshot) {
-      final data = snapshot.snapshot.value as List?;
-      final updated = [...?data, "${DateTime.now()}: $message"];
-      ref.set(updated);
-    });
-  }
-
-  void _notify(String message) {
-    final ref = dbRef.child('notifications');
-    ref.once().then((snapshot) {
-      final data = snapshot.snapshot.value as List?;
-      final updated = [...?data, message];
-      ref.set(updated);
-    });
   }
 
   String formatTime(int seconds) {
@@ -233,6 +195,7 @@ class _ScheduleFlipPageState extends State<ScheduleFlipPage> {
   Widget build(BuildContext context) {
     return Scaffold(
       appBar: AppBar(title: const Text("Schedule Flip")),
+      backgroundColor: const Color(0xFF141829),
       body: Padding(
         padding: const EdgeInsets.all(16),
         child: isBatchActive ? _buildControlPanel() : _buildScheduler(),
@@ -314,15 +277,17 @@ class _ScheduleFlipPageState extends State<ScheduleFlipPage> {
             labelText: "Target Temperature (°C)",
           ),
         ),
+        const SizedBox(height: 10),
         TextField(
           controller: humController,
           keyboardType: TextInputType.number,
           decoration: const InputDecoration(labelText: "Target Humidity (%)"),
         ),
         const SizedBox(height: 20),
-        ElevatedButton(
+        ElevatedButton.icon(
           onPressed: scheduleNewBatch,
-          child: const Text("Schedule New Batch"),
+          icon: const Icon(Icons.schedule),
+          label: const Text("Schedule New Batch"),
         ),
       ],
     );

@@ -8,6 +8,6 @@ export 'package:firebase_core/firebase_core.dart';
 export '../main.dart';
 
 //pages
-export 'dashboard_page.dart';
+export 'system_monitor_page.dart';
 export 'login_page.dart';
 export 'register_page.dart';
