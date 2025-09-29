@@ -1,153 +1,159 @@
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'login_page.dart';
 
 class ResetPasswordPage extends StatefulWidget {
-  final String email;
-  const ResetPasswordPage({super.key, required this.email});
+  const ResetPasswordPage({super.key});
 
   @override
   State<ResetPasswordPage> createState() => _ResetPasswordPageState();
 }
 
 class _ResetPasswordPageState extends State<ResetPasswordPage> {
-  final newPasswordController = TextEditingController();
-  final confirmController = TextEditingController();
-  bool loading = false;
-  bool showPassword = false;
+  final _formKey = GlobalKey<FormState>();
+  final _confirmPasswordController = TextEditingController();
+  final _newPasswordController = TextEditingController();
+  final _confirmNewPasswordController = TextEditingController();
+
+  bool _isLoading = false;
+  String? errorMessage;
 
   Future<void> updatePassword() async {
-    final newPassword = newPasswordController.text.trim();
-    final confirm = confirmController.text.trim();
-    final email = widget.email.trim().toLowerCase();
+    if (!_formKey.currentState!.validate()) return;
 
-    if (newPassword.isEmpty || confirm.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please fill in both fields")),
-      );
+    final user = FirebaseAuth.instance.currentUser;
+    final email = user?.email;
+
+    if (user == null || email == null) {
+      setState(() {
+        errorMessage = "No authenticated user found.";
+      });
       return;
     }
 
-    if (newPassword != confirm) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(const SnackBar(content: Text("Passwords do not match")));
-      return;
-    }
-
-    setState(() => loading = true);
+    setState(() {
+      _isLoading = true;
+      errorMessage = null;
+    });
 
     try {
-      final docRef = FirebaseFirestore.instance
-          .collection('password_resets')
-          .doc(email);
-
-      final doc = await docRef.get();
-      if (!doc.exists) {
-        setState(() => loading = false);
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Update failed: No reset record found."),
-          ),
-        );
-        return;
-      }
-
-      final data = doc.data();
-      final oldPassword = data?['password'];
-      if (oldPassword == null) throw "Missing original password.";
-
-      await FirebaseAuth.instance.signInWithEmailAndPassword(
+      final cred = EmailAuthProvider.credential(
         email: email,
-        password: oldPassword,
+        password: _confirmPasswordController.text.trim(),
       );
-
-      final user = FirebaseAuth.instance.currentUser;
-      await user?.updatePassword(newPassword);
-
-      await docRef.delete();
-      await FirebaseAuth.instance.signOut();
+      await user.reauthenticateWithCredential(cred);
+      await user.updatePassword(_newPasswordController.text.trim());
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Password updated successfully")),
+        const SnackBar(content: Text("✅ Password updated successfully!")),
       );
-
-      if (mounted) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (_) => const LoginPage()),
-        );
+      Navigator.pop(context);
+    } on FirebaseAuthException catch (e) {
+      String message = "An error occurred.";
+      switch (e.code) {
+        case 'wrong-password':
+          message = "❌ Your current password is incorrect.";
+          break;
+        case 'weak-password':
+          message = "⚠️ New password is too weak.";
+          break;
+        case 'requires-recent-login':
+          message = "⏳ Please re-login before updating your password.";
+          break;
       }
-    } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Update failed: $e")));
+      setState(() {
+        errorMessage = message;
+      });
     } finally {
-      setState(() => loading = false);
+      setState(() => _isLoading = false);
     }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
+      appBar: AppBar(
+        title: const Text("Reset Password"),
+        backgroundColor: Colors.transparent,
+        elevation: 0,
+      ),
+      backgroundColor: const Color(0xFF141829),
       body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 30),
-        child: Center(
-          child: SingleChildScrollView(
-            child: Column(
-              children: [
-                const Text(
-                  "SolarDryFish",
-                  style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
-                ),
-                const SizedBox(height: 10),
-                const Text("Reset Password", style: TextStyle(fontSize: 22)),
-                const SizedBox(height: 30),
-                TextField(
-                  controller: newPasswordController,
-                  obscureText: !showPassword,
-                  decoration: InputDecoration(
-                    labelText: "New Password",
-                    border: const OutlineInputBorder(),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        showPassword ? Icons.visibility : Icons.visibility_off,
-                      ),
-                      onPressed: () =>
-                          setState(() => showPassword = !showPassword),
-                    ),
+        padding: const EdgeInsets.all(16),
+        child: Form(
+          key: _formKey,
+          child: Column(
+            children: [
+              if (errorMessage != null)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 12),
+                  child: Text(
+                    errorMessage!,
+                    style: const TextStyle(color: Colors.redAccent),
                   ),
                 ),
-                const SizedBox(height: 15),
-                TextField(
-                  controller: confirmController,
-                  obscureText: !showPassword,
-                  decoration: InputDecoration(
-                    labelText: "Confirm Password",
-                    border: const OutlineInputBorder(),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        showPassword ? Icons.visibility : Icons.visibility_off,
-                      ),
-                      onPressed: () =>
-                          setState(() => showPassword = !showPassword),
-                    ),
-                  ),
+              TextFormField(
+                controller: _confirmPasswordController,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: "Confirm Current Password",
+                  filled: true,
+                  fillColor: Color(0xFF1E2338),
+                  border: OutlineInputBorder(),
+                  labelStyle: TextStyle(color: Colors.amber),
                 ),
-                const SizedBox(height: 20),
-                loading
-                    ? const CircularProgressIndicator()
-                    : ElevatedButton(
-                        onPressed: updatePassword,
-                        child: const Text("Update"),
-                      ),
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("Back to login"),
+                validator: (value) => value == null || value.isEmpty
+                    ? "Enter your current password"
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _newPasswordController,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: "New Password",
+                  filled: true,
+                  fillColor: Color(0xFF1E2338),
+                  border: OutlineInputBorder(),
+                  labelStyle: TextStyle(color: Colors.amber),
                 ),
-              ],
-            ),
+                validator: (value) => value == null || value.isEmpty
+                    ? "Enter a new password"
+                    : null,
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _confirmNewPasswordController,
+                obscureText: true,
+                decoration: const InputDecoration(
+                  labelText: "Confirm New Password",
+                  filled: true,
+                  fillColor: Color(0xFF1E2338),
+                  border: OutlineInputBorder(),
+                  labelStyle: TextStyle(color: Colors.amber),
+                ),
+                validator: (value) {
+                  if (value == null || value.isEmpty) {
+                    return "Re-enter your new password";
+                  }
+                  if (value != _newPasswordController.text.trim()) {
+                    return "Passwords do not match";
+                  }
+                  return null;
+                },
+              ),
+              const SizedBox(height: 20),
+              ElevatedButton.icon(
+                onPressed: _isLoading ? null : updatePassword,
+                icon: _isLoading
+                    ? const SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(strokeWidth: 2),
+                      )
+                    : const Icon(Icons.check),
+                label: Text(_isLoading ? "Updating..." : "Update Password"),
+              ),
+            ],
           ),
         ),
       ),

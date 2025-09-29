@@ -1,9 +1,11 @@
+import 'dart:async';
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'package:firebase_messaging/firebase_messaging.dart';
+import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:connectivity_plus/connectivity_plus.dart';
-import 'dart:async';
-import 'dart:io';
 
 import 'pages/login_page.dart';
 import 'pages/register_page.dart';
@@ -13,10 +15,69 @@ import 'pages/schedule_flip_page.dart';
 import 'pages/activity_log_page.dart';
 import 'pages/notifications_page.dart';
 import 'pages/system_selector_page.dart';
+import 'pages/account_page.dart';
+import 'pages/reset_password_page.dart';
+
+final FlutterLocalNotificationsPlugin flutterLocalNotificationsPlugin =
+    FlutterLocalNotificationsPlugin();
+
+Future<void> _firebaseMessagingBackgroundHandler(RemoteMessage message) async {
+  await Firebase.initializeApp();
+  print("🔕 Background message received: ${message.messageId}");
+}
+
+Future<void> initFCM() async {
+  await FirebaseMessaging.instance.requestPermission();
+
+  const AndroidNotificationChannel channel = AndroidNotificationChannel(
+    'high_importance_channel',
+    'High Importance Notifications',
+    importance: Importance.high,
+  );
+
+  await flutterLocalNotificationsPlugin
+      .resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin
+      >()
+      ?.createNotificationChannel(channel);
+
+  const AndroidInitializationSettings androidSettings =
+      AndroidInitializationSettings('@mipmap/ic_launcher');
+
+  const InitializationSettings initSettings = InitializationSettings(
+    android: androidSettings,
+  );
+
+  await flutterLocalNotificationsPlugin.initialize(initSettings);
+
+  FirebaseMessaging.onMessage.listen((RemoteMessage message) {
+    RemoteNotification? notification = message.notification;
+    AndroidNotification? android = message.notification?.android;
+
+    if (notification != null && android != null) {
+      flutterLocalNotificationsPlugin.show(
+        notification.hashCode,
+        notification.title,
+        notification.body,
+        NotificationDetails(
+          android: AndroidNotificationDetails(
+            channel.id,
+            channel.name,
+            importance: Importance.high,
+            priority: Priority.high,
+          ),
+        ),
+      );
+    }
+  });
+
+  FirebaseMessaging.onBackgroundMessage(_firebaseMessagingBackgroundHandler);
+}
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await Firebase.initializeApp();
+  await initFCM();
   runApp(const MyApp());
 }
 
@@ -44,32 +105,53 @@ class MyApp extends StatelessWidget {
       ),
       home: const SplashScreen(),
       onGenerateRoute: (settings) {
-        final systemId = settings.arguments as String?;
-        if (systemId == null) {
-          return MaterialPageRoute(builder: (_) => const SystemSelectorPage());
+        String? systemId;
+        final args = settings.arguments;
+        if (args is String) {
+          systemId = args;
+        } else if (args is Map<String, dynamic>) {
+          systemId = args['systemId'] as String?;
         }
 
         switch (settings.name) {
           case '/dashboard':
             return MaterialPageRoute(
-              builder: (_) => DashboardPage(systemId: systemId),
+              builder: (_) => systemId != null
+                  ? DashboardPage(systemId: systemId)
+                  : const SystemSelectorPage(),
             );
           case '/schedule':
             return MaterialPageRoute(
-              builder: (_) => ScheduleFlipPage(systemId: systemId),
+              builder: (_) => systemId != null
+                  ? ScheduleFlipPage(systemId: systemId)
+                  : const SystemSelectorPage(),
             );
           case '/log':
             return MaterialPageRoute(
-              builder: (_) => ActivityLogPage(systemId: systemId),
+              builder: (_) => systemId != null
+                  ? ActivityLogPage(systemId: systemId)
+                  : const SystemSelectorPage(),
             );
           case '/notifications':
             return MaterialPageRoute(
-              builder: (_) => NotificationsPage(systemId: systemId),
+              builder: (_) => systemId != null
+                  ? NotificationsPage(systemId: systemId)
+                  : const SystemSelectorPage(),
             );
           case '/monitor':
             return MaterialPageRoute(
-              builder: (_) => SystemMonitorPage(systemId: systemId),
+              builder: (_) => systemId != null
+                  ? SystemMonitorPage(systemId: systemId)
+                  : const SystemSelectorPage(),
             );
+          case '/account':
+            return MaterialPageRoute(
+              builder: (_) => systemId != null
+                  ? AccountPage(systemId: systemId)
+                  : const SystemSelectorPage(),
+            );
+          case '/reset_pass':
+            return MaterialPageRoute(builder: (_) => const ResetPasswordPage());
           case '/register':
             return MaterialPageRoute(builder: (_) => const RegisterPage());
           default:
@@ -109,21 +191,27 @@ class _SplashScreenState extends State<SplashScreen>
     final hasInternet = result != ConnectivityResult.none;
 
     if (hasInternet) {
-      setState(() {
-        isConnected = true;
-        checking = false;
-      });
+      if (mounted) {
+        setState(() {
+          isConnected = true;
+          checking = false;
+        });
+      }
     } else {
       await showNoInternetDialog();
-      setState(() {
-        isConnected = false;
-        checking = true;
-      });
-      checkConnectivity();
+      if (mounted) {
+        setState(() {
+          isConnected = false;
+          checking = true;
+        });
+      }
+      await Future.delayed(const Duration(seconds: 2));
+      if (mounted) checkConnectivity();
     }
   }
 
   Future<void> showNoInternetDialog() async {
+    if (!mounted) return;
     return showDialog(
       context: context,
       barrierDismissible: false,
@@ -240,7 +328,7 @@ class AuthWrapper extends StatelessWidget {
           return const SplashScreen();
         }
         if (snapshot.hasData) {
-          return const SystemSelectorPage(); // ✅ Now prompts for systemId
+          return const SystemSelectorPage();
         }
         return const LoginPage();
       },

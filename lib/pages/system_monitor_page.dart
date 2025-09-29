@@ -42,6 +42,7 @@ class _SystemMonitorPageState extends State<SystemMonitorPage> {
 
     systemRef.child('sensors').onValue.listen((event) {
       final data = event.snapshot.value as Map?;
+      debugPrint("Live sensor update: $data");
       if (data != null) parseSensorData(data);
     });
 
@@ -86,6 +87,7 @@ class _SystemMonitorPageState extends State<SystemMonitorPage> {
   Future<void> fetchSensorData() async {
     final snapshot = await systemRef.child('sensors').get();
     final data = snapshot.value as Map?;
+    debugPrint("Fetched sensor snapshot: $data");
     if (data != null) parseSensorData(data);
   }
 
@@ -96,11 +98,24 @@ class _SystemMonitorPageState extends State<SystemMonitorPage> {
 
     for (var entry in data.entries) {
       if (entry.key.startsWith('sht31_')) {
-        sht[entry.key] = Map<String, dynamic>.from(entry.value ?? {});
-      } else if (entry.key == 'rain') {
-        rain.addAll(Map<String, dynamic>.from(entry.value ?? {}));
-      } else if (entry.key == 'light') {
-        light.addAll(Map<String, dynamic>.from(entry.value ?? {}));
+        final sensorMap = entry.value;
+        if (sensorMap is Map) {
+          sht[entry.key] = Map<String, dynamic>.from(sensorMap);
+        } else {
+          debugPrint("Missing or invalid data for ${entry.key}");
+        }
+      } else if (entry.key == 'rain' || entry.key == 'light') {
+        final list = entry.value as List?;
+        if (list != null) {
+          final mapped = {
+            for (int i = 1; i < list.length; i++) "$i": list[i] ?? 0,
+          };
+          if (entry.key == 'rain') {
+            rain.addAll(mapped);
+          } else {
+            light.addAll(mapped);
+          }
+        }
       }
     }
 
@@ -173,8 +188,20 @@ class _SystemMonitorPageState extends State<SystemMonitorPage> {
 
   Widget buildSHTSensor(String key) {
     final data = Map<String, dynamic>.from(shtData[key] ?? {});
-    final temp = (data['temp'] ?? 0).toDouble();
-    final hum = (data['hum'] ?? 0).toDouble();
+    final connectedRaw = data['connected'];
+    final connected = connectedRaw == true || connectedRaw == "true";
+
+    if (!connected || data.isEmpty) {
+      return sensorCard(
+        title: key.replaceAll('_', ' ').toUpperCase(),
+        lines: ["Sensor not connected"],
+        color: Colors.grey,
+        icon: Icons.warning,
+      );
+    }
+
+    final temp = double.tryParse(data['temp'].toString()) ?? 0.0;
+    final hum = double.tryParse(data['hum'].toString()) ?? 0.0;
     final timestamp = data['timestamp'];
     final time = timestamp != null
         ? DateFormat(
@@ -186,6 +213,7 @@ class _SystemMonitorPageState extends State<SystemMonitorPage> {
       "Temperature: ${temp.toStringAsFixed(1)} °C",
       "Humidity: ${hum.toStringAsFixed(0)} %",
       if (time != null) "Last updated: $time",
+      "Status: Connected ✅",
     ];
 
     return sensorCard(

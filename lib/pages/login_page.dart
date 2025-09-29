@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
 import 'register_page.dart';
-import 'forgot_password_page.dart';
 import 'system_selector_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -137,21 +136,7 @@ class _LoginPageState extends State<LoginPage> {
                     ),
                   ),
                   const SizedBox(height: 10),
-                  Align(
-                    alignment: Alignment.centerRight,
-                    child: TextButton(
-                      onPressed: () {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (_) => const ForgotPasswordPage(),
-                          ),
-                        );
-                      },
-                      child: const Text("Forgot Password?"),
-                    ),
-                  ),
-                  const SizedBox(height: 10),
+
                   loading
                       ? const CircularProgressIndicator()
                       : ElevatedButton.icon(

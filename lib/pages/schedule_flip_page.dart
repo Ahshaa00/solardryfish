@@ -1,6 +1,8 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 import 'package:firebase_database/firebase_database.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 import '../services/schedule_service.dart';
 import '../services/automation_service.dart';
 
@@ -16,6 +18,9 @@ class _ScheduleFlipPageState extends State<ScheduleFlipPage> {
   late final DatabaseReference systemRef;
   late final ScheduleService scheduleService;
   late final AutomationService automationService;
+
+  final user = FirebaseAuth.instance.currentUser;
+  late final String userEmail;
 
   int phase1Duration = 3600;
   int phase2Duration = 1800;
@@ -44,11 +49,14 @@ class _ScheduleFlipPageState extends State<ScheduleFlipPage> {
   @override
   void initState() {
     super.initState();
+    userEmail = user?.email ?? 'unknown';
     systemRef = FirebaseDatabase.instance.ref(
       'hardwareSystems/${widget.systemId}',
     );
     scheduleService = ScheduleService(systemRef);
     automationService = AutomationService(systemRef);
+
+    logAction("User logged in to system");
 
     scheduleService.listenToSchedule(
       onRemainingUpdate: (seconds) {
@@ -76,6 +84,15 @@ class _ScheduleFlipPageState extends State<ScheduleFlipPage> {
     );
   }
 
+  void logAction(String message) {
+    FirebaseFirestore.instance.collection('activity_logs').add({
+      'timestamp': FieldValue.serverTimestamp(),
+      'user': userEmail,
+      'systemId': widget.systemId,
+      'message': message,
+    });
+  }
+
   void _startCountdown() {
     countdownTimer?.cancel();
     if (remainingSeconds > 0) {
@@ -97,11 +114,11 @@ class _ScheduleFlipPageState extends State<ScheduleFlipPage> {
         'phase': 'Phase 2',
         'remaining': phase2Duration,
       });
-      scheduleService.log("Auto-switched to Phase 2");
+      logAction("Auto-switched to Phase 2");
       scheduleService.notify("Drying session flipped to Phase 2");
     } else {
       systemRef.child('schedule/remaining').set(0);
-      scheduleService.log("Drying session completed");
+      logAction("Drying session completed");
       scheduleService.notify("Drying session completed");
     }
   }
@@ -128,7 +145,7 @@ class _ScheduleFlipPageState extends State<ScheduleFlipPage> {
       hum: hum,
     );
 
-    scheduleService.log(
+    logAction(
       "Scheduled new batch with Phase 1: $phase1Duration sec, Phase 2: $phase2Duration sec, Temp: $temp°C, Humidity: $hum%",
     );
     scheduleService.notify("New drying batch scheduled");
@@ -137,38 +154,38 @@ class _ScheduleFlipPageState extends State<ScheduleFlipPage> {
   void stopDryingSession() {
     countdownTimer?.cancel();
     systemRef.child('schedule').update({'remaining': 0, 'phase': 'Phase 1'});
-    scheduleService.log("Drying session manually stopped");
+    logAction("Drying session manually stopped");
     scheduleService.notify("Drying session stopped");
   }
 
   void toggleLid() {
     final newState = lidOpen ? "close" : "open";
     scheduleService.toggleControl("lid", newState);
-    scheduleService.log("Lid toggled to $newState");
+    logAction("Lid toggled to $newState");
     scheduleService.notify("Lid is now $newState");
   }
 
   void toggleHeater() {
     final newState = heaterOn ? "off" : "on";
     scheduleService.toggleControl("heater", newState);
-    scheduleService.log("Heater toggled to $newState");
+    logAction("Heater toggled to $newState");
     scheduleService.notify("Heater is now $newState");
   }
 
   void triggerFlip() {
     scheduleService.toggleControl("flip", "flipping");
-    scheduleService.log("Flip triggered");
+    logAction("Flip triggered");
 
     if (currentPhase == 'Phase 1') {
       systemRef.child('schedule').update({
         'phase': 'Phase 2',
         'remaining': phase2Duration,
       });
-      scheduleService.log("Manually flipped to Phase 2");
+      logAction("Manually flipped to Phase 2");
       scheduleService.notify("Manually flipped to Phase 2");
     } else {
       systemRef.child('schedule/remaining').set(0);
-      scheduleService.log("Drying session ended after Phase 2");
+      logAction("Drying session ended after Phase 2");
       scheduleService.notify("Drying session ended");
     }
   }

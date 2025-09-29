@@ -1,1 +1,35 @@
-{"flutter":{"platforms":{"android":{"default":{"projectId":"solar-e1840","appId":"1:296900597500:android:e73dab2bf509867edea979","fileOutput":"android/app/google-services.json"}},"dart":{"lib/firebase_options.dart":{"projectId":"solar-e1840","configurations":{"android":"1:296900597500:android:e73dab2bf509867edea979","web":"1:296900597500:web:4ae1389954166806dea979"}}}}}}
+{
+  "flutter": {
+    "platforms": {
+      "android": {
+        "default": {
+          "projectId": "solar-e1840",
+          "appId": "1:296900597500:android:e73dab2bf509867edea979",
+          "fileOutput": "android/app/google-services.json"
+        }
+      },
+      "dart": {
+        "lib/firebase_options.dart": {
+          "projectId": "solar-e1840",
+          "configurations": {
+            "android": "1:296900597500:android:e73dab2bf509867edea979",
+            "web": "1:296900597500:web:4ae1389954166806dea979"
+          }
+        }
+      }
+    }
+  },
+  "functions": [
+    {
+      "source": "functions",
+      "codebase": "default",
+      "ignore": [
+        "node_modules",
+        ".git",
+        "firebase-debug.log",
+        "firebase-debug.*.log",
+        "*.local"
+      ]
+    }
+  ]
+}

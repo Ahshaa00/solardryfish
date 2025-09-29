@@ -193,7 +193,7 @@ class _DashboardPageState extends State<DashboardPage> {
               ),
               onTap: () => Navigator.pushNamed(
                 context,
-                '/schedule',
+                '/account',
                 arguments: widget.systemId,
               ),
             ),
