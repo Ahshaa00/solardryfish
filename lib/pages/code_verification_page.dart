@@ -1,12 +1,19 @@
-import 'package:flutter/material.dart';
-import 'package:cloud_firestore/cloud_firestore.dart';
-import 'package:firebase_auth/firebase_auth.dart';
-import 'system_selector_page.dart';
+import 'dart:math';
+import '../barrel.dart';
 
 class CodeVerificationPage extends StatefulWidget {
   final String email;
+  final String password;
+  final String firstName;
+  final String lastName;
 
-  const CodeVerificationPage({super.key, required this.email});
+  const CodeVerificationPage({
+    super.key,
+    required this.email,
+    required this.password,
+    required this.firstName,
+    required this.lastName,
+  });
 
   @override
   State<CodeVerificationPage> createState() => _CodeVerificationPageState();
@@ -15,6 +22,15 @@ class CodeVerificationPage extends StatefulWidget {
 class _CodeVerificationPageState extends State<CodeVerificationPage> {
   final codeController = TextEditingController();
   bool loading = false;
+
+  String _generateUserId() {
+    final now = DateTime.now();
+    final dateStr = '${now.year.toString().substring(2)}${now.month.toString().padLeft(2, '0')}${now.day.toString().padLeft(2, '0')}';
+    final random = Random();
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
+    final randomStr = List.generate(4, (_) => chars[random.nextInt(chars.length)]).join();
+    return 'USR-$dateStr-$randomStr';
+  }
 
   Future<void> verifyOtp() async {
     final enteredOtp = codeController.text.trim();
@@ -30,16 +46,14 @@ class _CodeVerificationPageState extends State<CodeVerificationPage> {
     setState(() => loading = true);
 
     try {
-      final docRef = FirebaseFirestore.instance
-          .collection('pending_verifications')
-          .doc(email);
+      // Registration Flow Only
+      final docRef = FirebaseFirestore.instance.collection('pending_verifications').doc(email);
 
       final doc = await docRef.get();
       if (!doc.exists) throw "No OTP record found.";
 
       final data = doc.data()!;
       final correctOtp = data['otp'];
-      final password = data['password'];
       final expiresAt = (data['expiresAt'] as Timestamp).toDate();
 
       if (DateTime.now().isAfter(expiresAt)) {
@@ -49,12 +63,35 @@ class _CodeVerificationPageState extends State<CodeVerificationPage> {
 
       if (enteredOtp != correctOtp) throw "Incorrect OTP.";
 
-      // ✅ Registration Flow
+      // ✅ Create account using password from memory (not from Firestore)
+      final password = widget.password;
+      
       try {
-        await FirebaseAuth.instance.createUserWithEmailAndPassword(
+        final userCredential = await FirebaseAuth.instance.createUserWithEmailAndPassword(
           email: email,
           password: password,
         );
+
+        final user = userCredential.user;
+        if (user == null) throw "User creation failed";
+
+        // ✅ Generate unique user ID
+        final userId = _generateUserId();
+
+        // ✅ Store user profile in Realtime Database
+        await FirebaseDatabase.instance.ref('users/${user.uid}/profile').set({
+          'userId': userId,
+          'firstName': widget.firstName,
+          'lastName': widget.lastName,
+          'email': email,
+          'createdAt': ServerValue.timestamp,
+        });
+
+        // ✅ Create reverse index for quick lookup
+        await FirebaseDatabase.instance.ref('userIdIndex/$userId').set(user.uid);
+
+        // ✅ Send email verification immediately after account creation
+        await user.sendEmailVerification();
 
         await FirebaseAuth.instance.signInWithEmailAndPassword(
           email: email,
@@ -64,13 +101,17 @@ class _CodeVerificationPageState extends State<CodeVerificationPage> {
         await docRef.delete();
 
         ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text("Account created successfully.")),
+          const SnackBar(
+            content: Text("Account created! Please verify your email."),
+            backgroundColor: Colors.green,
+          ),
         );
 
         if (mounted) {
+          // ✅ Will redirect to EmailVerificationPage via AuthWrapper
           Navigator.pushReplacement(
             context,
-            MaterialPageRoute(builder: (_) => const SystemSelectorPage()),
+            MaterialPageRoute(builder: (_) => const EmailVerificationPage()),
           );
         }
       } on FirebaseAuthException catch (e) {
@@ -82,7 +123,7 @@ class _CodeVerificationPageState extends State<CodeVerificationPage> {
             ),
           );
         } else {
-          rethrow; // other FirebaseAuth errors
+          rethrow;
         }
       }
     } catch (e) {
@@ -97,37 +138,240 @@ class _CodeVerificationPageState extends State<CodeVerificationPage> {
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Verify Email")),
-      body: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 30),
-        child: Center(
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              const Text(
-                "Enter the OTP sent to your email to complete registration",
-                textAlign: TextAlign.center,
+      appBar: AppBar(
+        title: const Text(
+          "Verify Email",
+          style: TextStyle(fontWeight: FontWeight.bold),
+        ),
+        backgroundColor: const Color(0xFF1E2235),
+        elevation: 0,
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back, color: Colors.amber),
+          onPressed: () => Navigator.pop(context),
+        ),
+      ),
+      backgroundColor: const Color(0xFF141829),
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.center,
+          children: [
+            const SizedBox(height: 20),
+            
+            // Header Icon
+            Container(
+              padding: const EdgeInsets.all(24),
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: LinearGradient(
+                  colors: [Colors.amber.shade700, Colors.amber],
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: Colors.amber.withOpacity(0.3),
+                    blurRadius: 20,
+                    spreadRadius: 3,
+                  ),
+                ],
               ),
-              const SizedBox(height: 20),
-              TextField(
-                controller: codeController,
-                keyboardType: TextInputType.number,
-                maxLength: 4,
-                decoration: const InputDecoration(
-                  labelText: "OTP",
-                  prefixIcon: Icon(Icons.verified),
-                  border: OutlineInputBorder(),
+              child: const Icon(
+                Icons.mark_email_read,
+                size: 60,
+                color: Colors.black87,
+              ),
+            ),
+            
+            const SizedBox(height: 32),
+            
+            // Title
+            const Text(
+              "Verify Your Email",
+              style: TextStyle(
+                fontSize: 28,
+                fontWeight: FontWeight.bold,
+                color: Colors.white,
+              ),
+            ),
+            
+            const SizedBox(height: 12),
+            
+            // Subtitle
+            Text(
+              "We've sent a 4-digit code to",
+              textAlign: TextAlign.center,
+              style: TextStyle(
+                fontSize: 16,
+                color: Colors.grey.shade400,
+              ),
+            ),
+            
+            const SizedBox(height: 8),
+            
+            // Email Display
+            Container(
+              padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              decoration: BoxDecoration(
+                color: Colors.amber.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(color: Colors.amber.withOpacity(0.3)),
+              ),
+              child: Text(
+                widget.email,
+                style: const TextStyle(
+                  color: Colors.amber,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w500,
                 ),
               ),
-              const SizedBox(height: 20),
-              loading
-                  ? const CircularProgressIndicator()
-                  : ElevatedButton(
-                      onPressed: verifyOtp,
-                      child: const Text("Verify"),
+            ),
+            
+            const SizedBox(height: 40),
+            
+            // OTP Input
+            Container(
+              padding: const EdgeInsets.all(20),
+              decoration: BoxDecoration(
+                color: const Color(0xFF1E2235),
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: Colors.amber.withOpacity(0.2)),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    children: [
+                      Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Colors.amber.withOpacity(0.2),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: const Icon(
+                          Icons.pin,
+                          color: Colors.amber,
+                          size: 20,
+                        ),
+                      ),
+                      const SizedBox(width: 12),
+                      const Text(
+                        "Enter OTP Code",
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontSize: 16,
+                          fontWeight: FontWeight.bold,
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 16),
+                  TextField(
+                    controller: codeController,
+                    keyboardType: TextInputType.number,
+                    maxLength: 4,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      color: Colors.white,
+                      fontSize: 32,
+                      fontWeight: FontWeight.bold,
+                      letterSpacing: 16,
                     ),
-            ],
-          ),
+                    decoration: InputDecoration(
+                      hintText: "••••",
+                      hintStyle: TextStyle(
+                        color: Colors.grey.shade600,
+                        letterSpacing: 16,
+                      ),
+                      filled: true,
+                      fillColor: const Color(0xFF141829),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide.none,
+                      ),
+                      enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: BorderSide(color: Colors.grey.shade800),
+                      ),
+                      focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(12),
+                        borderSide: const BorderSide(color: Colors.amber, width: 2),
+                      ),
+                      counterText: "",
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            
+            const SizedBox(height: 32),
+            
+            // Verify Button
+            SizedBox(
+              width: double.infinity,
+              height: 56,
+              child: ElevatedButton(
+                onPressed: loading ? null : verifyOtp,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: Colors.amber,
+                  foregroundColor: Colors.black87,
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  elevation: 0,
+                  disabledBackgroundColor: Colors.grey.shade800,
+                ),
+                child: loading
+                    ? const SizedBox(
+                        width: 24,
+                        height: 24,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 3,
+                          valueColor: AlwaysStoppedAnimation<Color>(Colors.black87),
+                        ),
+                      )
+                    : const Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          Icon(Icons.verified_user, size: 24),
+                          SizedBox(width: 12),
+                          Text(
+                            "Verify & Continue",
+                            style: TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+              ),
+            ),
+            
+            const SizedBox(height: 24),
+            
+            // Info Box
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.blue.withOpacity(0.1),
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.blue.withOpacity(0.3)),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.info_outline, color: Colors.blue, size: 20),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Text(
+                      "Didn't receive the code? Check your spam folder or request a new one.",
+                      style: TextStyle(
+                        color: Colors.grey.shade300,
+                        fontSize: 12,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
         ),
       ),
     );

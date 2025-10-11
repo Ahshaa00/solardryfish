@@ -1,10 +1,12 @@
 import 'dart:math';
 import 'dart:convert';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import 'package:http/http.dart' as http;
 import 'package:firebase_auth/firebase_auth.dart';
 import 'code_verification_page.dart';
+import '../utils/validators.dart';
 
 class RegisterPage extends StatefulWidget {
   const RegisterPage({super.key});
@@ -14,10 +16,14 @@ class RegisterPage extends StatefulWidget {
 }
 
 class _RegisterPageState extends State<RegisterPage> {
+  final firstNameController = TextEditingController();
+  final lastNameController = TextEditingController();
   final emailController = TextEditingController();
   final passwordController = TextEditingController();
+  final _formKey = GlobalKey<FormState>();
   bool loading = false;
   bool showPassword = false;
+  int passwordStrength = 0;
 
   Future<void> sendOtpEmail(String email, String otp) async {
     const serviceId = 'service_lhe1js8';
@@ -45,15 +51,14 @@ class _RegisterPageState extends State<RegisterPage> {
   }
 
   Future<void> startRegistration() async {
-    final email = emailController.text.trim().toLowerCase();
-    final password = passwordController.text.trim();
-
-    if (email.isEmpty || password.isEmpty || !email.contains('@')) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter valid credentials")),
-      );
+    if (!_formKey.currentState!.validate()) {
       return;
     }
+
+    final firstName = firstNameController.text.trim();
+    final lastName = lastNameController.text.trim();
+    final email = emailController.text.trim().toLowerCase();
+    final password = passwordController.text.trim();
 
     setState(() => loading = true);
 
@@ -68,7 +73,6 @@ class _RegisterPageState extends State<RegisterPage> {
           .set({
             'email': email,
             'otp': otp,
-            'password': password,
             'timestamp': FieldValue.serverTimestamp(),
             'expiresAt': Timestamp.fromDate(expiresAt),
           });
@@ -83,7 +87,14 @@ class _RegisterPageState extends State<RegisterPage> {
       if (mounted) {
         Navigator.push(
           context,
-          MaterialPageRoute(builder: (_) => CodeVerificationPage(email: email)),
+          MaterialPageRoute(
+            builder: (_) => CodeVerificationPage(
+              email: email,
+              password: password,
+              firstName: firstName,
+              lastName: lastName,
+            ),
+          ),
         );
       }
     } on FirebaseAuthException catch (e) {
@@ -123,44 +134,125 @@ class _RegisterPageState extends State<RegisterPage> {
                   style: TextStyle(fontSize: 32, fontWeight: FontWeight.bold),
                 ),
                 const SizedBox(height: 10),
-                const Text("Register", style: TextStyle(fontSize: 22)),
+                const Text("Create Account", style: TextStyle(fontSize: 22)),
                 const SizedBox(height: 30),
-                TextField(
-                  controller: emailController,
-                  keyboardType: TextInputType.emailAddress,
-                  decoration: const InputDecoration(
-                    labelText: "Email",
-                    prefixIcon: Icon(Icons.email),
-                    border: OutlineInputBorder(),
-                  ),
-                ),
-                const SizedBox(height: 15),
-                TextField(
-                  controller: passwordController,
-                  obscureText: !showPassword,
-                  decoration: InputDecoration(
-                    labelText: "Password",
-                    border: const OutlineInputBorder(),
-                    prefixIcon: const Icon(Icons.lock),
-                    suffixIcon: IconButton(
-                      icon: Icon(
-                        showPassword ? Icons.visibility : Icons.visibility_off,
+                Form(
+                  key: _formKey,
+                  child: Column(
+                    children: [
+                      TextFormField(
+                        controller: firstNameController,
+                        textCapitalization: TextCapitalization.words,
+                        maxLength: 50,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r"[a-zA-Z\s\-']")),
+                        ],
+                        validator: (value) => Validators.validateName(value, 'First name'),
+                        decoration: const InputDecoration(
+                          labelText: "First Name",
+                          prefixIcon: Icon(Icons.person),
+                          border: OutlineInputBorder(),
+                          counterText: '',
+                        ),
                       ),
-                      onPressed: () =>
-                          setState(() => showPassword = !showPassword),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 20),
-                loading
-                    ? const CircularProgressIndicator()
-                    : ElevatedButton(
-                        onPressed: startRegistration,
-                        child: const Text("Register"),
+                      const SizedBox(height: 15),
+                      TextFormField(
+                        controller: lastNameController,
+                        textCapitalization: TextCapitalization.words,
+                        maxLength: 50,
+                        inputFormatters: [
+                          FilteringTextInputFormatter.allow(RegExp(r"[a-zA-Z\s\-']")),
+                        ],
+                        validator: (value) => Validators.validateName(value, 'Last name'),
+                        decoration: const InputDecoration(
+                          labelText: "Last Name",
+                          prefixIcon: Icon(Icons.person_outline),
+                          border: OutlineInputBorder(),
+                          counterText: '',
+                        ),
                       ),
-                TextButton(
-                  onPressed: () => Navigator.pop(context),
-                  child: const Text("Back to login"),
+                      const SizedBox(height: 15),
+                      TextFormField(
+                        controller: emailController,
+                        keyboardType: TextInputType.emailAddress,
+                        maxLength: 320,
+                        validator: Validators.validateEmail,
+                        decoration: const InputDecoration(
+                          labelText: "Email",
+                          prefixIcon: Icon(Icons.email),
+                          border: OutlineInputBorder(),
+                          counterText: '',
+                        ),
+                      ),
+                      const SizedBox(height: 15),
+                      TextFormField(
+                        controller: passwordController,
+                        obscureText: !showPassword,
+                        maxLength: 72,
+                        onChanged: (value) {
+                          setState(() {
+                            passwordStrength = Validators.getPasswordStrength(value);
+                          });
+                        },
+                        validator: (value) => Validators.validatePassword(value, isNewPassword: true),
+                        decoration: InputDecoration(
+                          labelText: "Password",
+                          border: const OutlineInputBorder(),
+                          prefixIcon: const Icon(Icons.lock),
+                          counterText: '',
+                          suffixIcon: IconButton(
+                            icon: Icon(
+                              showPassword ? Icons.visibility : Icons.visibility_off,
+                            ),
+                            onPressed: () =>
+                                setState(() => showPassword = !showPassword),
+                          ),
+                        ),
+                      ),
+                      if (passwordController.text.isNotEmpty) ...[
+                        const SizedBox(height: 8),
+                        Row(
+                          children: [
+                            Expanded(
+                              child: LinearProgressIndicator(
+                                value: passwordStrength / 4,
+                                backgroundColor: Colors.grey.shade300,
+                                valueColor: AlwaysStoppedAnimation<Color>(
+                                  Color(Validators.getPasswordStrengthColor(passwordStrength)),
+                                ),
+                                minHeight: 4,
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              Validators.getPasswordStrengthLabel(passwordStrength),
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: Color(Validators.getPasswordStrengthColor(passwordStrength)),
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        const Text(
+                          'Must contain: 8+ chars, uppercase, lowercase, number, special char',
+                          style: TextStyle(fontSize: 10, color: Colors.grey),
+                        ),
+                      ],
+                      const SizedBox(height: 20),
+                      loading
+                          ? const CircularProgressIndicator()
+                          : ElevatedButton(
+                              onPressed: startRegistration,
+                              child: const Text("Register"),
+                            ),
+                      TextButton(
+                        onPressed: () => Navigator.pop(context),
+                        child: const Text("Back to login"),
+                      ),
+                    ],
+                  ),
                 ),
               ],
             ),

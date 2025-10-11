@@ -1,0 +1,121 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ============================================================
+    // 🔐 AUTHENTICATION & VERIFICATION
+    // ============================================================
+
+    // Registration OTPs — allow unauthenticated read/write for signup
+    // ⚠️ TODO: Add rate limiting via Firebase App Check or Cloud Functions
+    match /pending_verifications/{email} {
+      allow read: if true; // Needed for OTP verification during registration
+      allow create: if true; // Anyone can request registration OTP
+      allow update: if false; // Prevent modification
+      allow delete: if request.auth != null; // Only authenticated users can cleanup
+    }
+
+    // Password reset OTPs — allow unauthenticated access for recovery
+    // ⚠️ TODO: Add rate limiting and expiration checks
+    match /password_resets/{email} {
+      allow read: if true; // Needed for password reset verification
+      allow create: if true; // Anyone can request password reset
+      allow update: if false; // Prevent modification
+      allow delete: if request.auth != null; // Only authenticated users can cleanup
+    }
+
+    // ============================================================
+    // 👤 USER DATA
+    // ============================================================
+
+    // User access control — only owner can read/write their data
+    match /userAccess/{uid} {
+      allow read, write: if request.auth != null 
+                         && request.auth.uid == uid
+                         && request.auth.token.email_verified == true; // ✅ Email must be verified
+    }
+
+    // User notifications — only owner can access
+    match /user_notifications/{uid} {
+      allow read, write: if request.auth != null 
+                         && request.auth.uid == uid
+                         && request.auth.token.email_verified == true;
+    }
+
+    // ============================================================
+    // 🏭 SYSTEM MANAGEMENT
+    // ============================================================
+
+    // System metadata — authenticated users can read, owners can write
+    match /systems/{systemId} {
+      allow read: if request.auth != null 
+                  && request.auth.token.email_verified == true;
+      
+      allow create: if request.auth != null 
+                    && request.auth.token.email_verified == true
+                    && request.resource.data.ownerId == request.auth.uid; // Must set self as owner
+      
+      allow update: if request.auth != null 
+                    && request.auth.token.email_verified == true
+                    && resource.data.ownerId == request.auth.uid // Only owner can update
+                    && request.resource.data.ownerId == resource.data.ownerId; // Cannot change owner
+      
+      allow delete: if request.auth != null 
+                    && request.auth.token.email_verified == true
+                    && resource.data.ownerId == request.auth.uid; // Only owner can delete
+    }
+
+    // System statistics — authenticated users can read, app can write
+    match /system_stats/{systemId} {
+      allow read: if request.auth != null 
+                  && request.auth.token.email_verified == true;
+      
+      allow write: if request.auth != null 
+                   && request.auth.token.email_verified == true
+                   && exists(/databases/$(database)/documents/systems/$(systemId))
+                   && get(/databases/$(database)/documents/systems/$(systemId)).data.ownerId == request.auth.uid;
+    }
+
+    // ============================================================
+    // 📊 LOGGING & MONITORING
+    // ============================================================
+
+    // Activity logs — users can create and read, cannot modify
+    match /activity_logs/{logId} {
+      allow read: if request.auth != null;
+      
+      allow create: if request.auth != null;
+      
+      allow update: if false; // ✅ Logs are immutable
+      
+      allow delete: if request.auth != null; // Any authenticated user can delete logs
+    }
+
+    // System status logs — automatic offline detection logs
+    match /system_status_logs/{logId} {
+      allow read: if request.auth != null;
+      
+      allow create: if request.auth != null;
+      
+      allow update, delete: if false; // ✅ Status logs are immutable
+    }
+
+    // Batch completion logs — from MEGA hardware
+    match /batch_logs/{batchId} {
+      allow read: if request.auth != null;
+      
+      allow create: if request.auth != null;
+      
+      allow update, delete: if false; // ✅ Batch logs are immutable
+    }
+
+    // ============================================================
+    // 🚫 DENY ALL OTHER ACCESS
+    // ============================================================
+    
+    // Default deny for any unmatched paths
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
