@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:cloud_firestore/cloud_firestore.dart';
 import '../barrel.dart';
 import '../services/registration_code_service.dart';
@@ -10,6 +11,9 @@ class SystemSelectorPage extends StatefulWidget {
 }
 
 class _SystemSelectorPageState extends State<SystemSelectorPage> {
+  // 🎬 SCREENSHOT MODE: Set to true to use mock data
+  static const bool USE_MOCK_DATA = true;  // ⚠️ Change to false for real data
+
   final systemIdController = TextEditingController();
   final registrationCodeController = TextEditingController();
   bool useRegistrationCode = false;
@@ -20,6 +24,7 @@ class _SystemSelectorPageState extends State<SystemSelectorPage> {
   Map<String, bool> systemOnlineStatus = {}; // Track online status
   String? selectedSystemId;
   bool loadingSystems = true;
+  Timer? _refreshTimer;
 
   void _showErrorDialog(String title, String message, {IconData icon = Icons.error_outline, Color color = Colors.red}) {
     showDialog(
@@ -64,7 +69,59 @@ class _SystemSelectorPageState extends State<SystemSelectorPage> {
   @override
   void initState() {
     super.initState();
+    
+    // 🎬 MOCK DATA: Initialize with perfect screenshot data
+    if (USE_MOCK_DATA) {
+      _initializeMockData();
+      return;
+    }
+    
     _loadUserSystems();
+    
+    // Auto-refresh every 10 seconds to update online status
+    _refreshTimer = Timer.periodic(const Duration(seconds: 10), (timer) {
+      if (mounted) {
+        _loadUserSystems();
+      }
+    });
+  }
+
+  // 🎬 MOCK DATA: Initialize perfect data for screenshots
+  void _initializeMockData() {
+    setState(() {
+      loadingSystems = false;
+      
+      // Mock owned systems
+      ownedSystems = [
+        'SDF202509AA',
+        'SDF202509AB',
+      ];
+      
+      // Mock shared systems
+      sharedSystems = [
+        'SDF202509AC',
+      ];
+      
+      // All systems online
+      systemOnlineStatus = {
+        'SDF202509AA': true,
+        'SDF202509AB': true,
+        'SDF202509AC': true,
+      };
+      
+      // Pre-select first system
+      selectedSystemId = 'SDF202509AA';
+    });
+    
+    print('🎬 MOCK DATA: System Selector initialized with perfect screenshot data');
+  }
+  
+  @override
+  void dispose() {
+    _refreshTimer?.cancel();
+    systemIdController.dispose();
+    registrationCodeController.dispose();
+    super.dispose();
   }
 
   Future<void> _loadUserSystems() async {
@@ -99,9 +156,22 @@ class _SystemSelectorPageState extends State<SystemSelectorPage> {
           final systemId = entry.key.toString();
           final systemData = entry.value as Map<dynamic, dynamic>;
           
-          // Get online status
+          // Get online status with stale detection
           final status = systemData['status'] as Map<dynamic, dynamic>?;
-          onlineStatus[systemId] = status?['online'] == true;
+          final isOnline = status?['online'] == true;
+          final lastUpdate = status?['lastUpdate'];
+          
+          // Check if data is stale (no update in last 30 seconds)
+          bool isStale = false;
+          if (lastUpdate != null) {
+            final timestamp = lastUpdate is int ? lastUpdate : int.tryParse(lastUpdate.toString()) ?? 0;
+            final now = DateTime.now().millisecondsSinceEpoch;
+            final difference = now - timestamp;
+            isStale = difference > 60000; // 60 seconds (increased from 30s for stability)
+          }
+          
+          // Mark as offline if stale
+          onlineStatus[systemId] = isOnline && !isStale;
           
           // Check if user has shared access
           if (systemData['sharedWith'] != null) {
@@ -866,6 +936,11 @@ class _SystemSelectorPageState extends State<SystemSelectorPage> {
           ),
         ),
         actions: [
+          IconButton(
+            icon: const Icon(Icons.refresh, color: Colors.blue),
+            onPressed: _loadUserSystems,
+            tooltip: 'Refresh',
+          ),
           IconButton(
             icon: const Icon(Icons.logout, color: Colors.amber),
             onPressed: logout,

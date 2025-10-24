@@ -18,6 +18,9 @@ class SystemSettingsPage extends StatefulWidget {
 }
 
 class _SystemSettingsPageState extends State<SystemSettingsPage> {
+  // 🎬 SCREENSHOT MODE: Set to true to use mock data
+  static const bool USE_MOCK_DATA = true;  // ⚠️ Change to false for real data
+
   UserRole? currentUserRole;
   String ownerId = '';
   String ownerEmail = '';
@@ -28,7 +31,51 @@ class _SystemSettingsPageState extends State<SystemSettingsPage> {
   @override
   void initState() {
     super.initState();
+    
+    // 🎬 MOCK DATA: Initialize with perfect screenshot data
+    if (USE_MOCK_DATA) {
+      _initializeMockData();
+      return;
+    }
+    
     loadData();
+  }
+
+  // 🎬 MOCK DATA: Initialize perfect data for screenshots
+  void _initializeMockData() {
+    setState(() {
+      loading = false;
+      currentUserRole = UserRole.owner;
+      ownerId = 'owner123';
+      ownerEmail = 'owner@solardry.com';
+      ownerName = 'John Doe';
+      
+      // Create mock shared users
+      sharedUsers = {
+        'user1': SharedUser(
+          userId: 'user1',
+          email: 'user@solardry.com',
+          firstName: 'Jane',
+          lastName: 'Smith',
+          role: UserRole.viewer,
+          addedAt: DateTime.now().subtract(const Duration(days: 10)),
+          addedBy: 'owner123',
+          addedByName: 'John Doe',
+        ),
+        'admin1': SharedUser(
+          userId: 'admin1',
+          email: 'admin@solardry.com',
+          firstName: 'Admin',
+          lastName: 'User',
+          role: UserRole.admin,
+          addedAt: DateTime.now().subtract(const Duration(days: 30)),
+          addedBy: 'owner123',
+          addedByName: 'John Doe',
+        ),
+      };
+    });
+    
+    print('🎬 MOCK DATA: System Settings initialized with perfect screenshot data');
   }
 
   Future<void> loadData() async {

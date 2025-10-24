@@ -13,9 +13,13 @@ class ActivityLogScreen extends StatefulWidget {
 }
 
 class _ActivityLogScreenState extends State<ActivityLogScreen> {
+  // 🎬 SCREENSHOT MODE: Set to true to use mock data
+  static const bool USE_MOCK_DATA = true;  // ⚠️ Change to false for real data
+
   final int pageSize = 10;
   final int maxLogs = 150; // Changed from 50 to 150 (between 100-200)
   List<DocumentSnapshot> allLogs = [];
+  List<Map<String, dynamic>> mockLogs = []; // For mock data
   int currentPage = 0;
   bool isLoading = true;
   UserRole? userRole;
@@ -31,6 +35,13 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
   @override
   void initState() {
     super.initState();
+    
+    // 🎬 MOCK DATA: Initialize with perfect screenshot data
+    if (USE_MOCK_DATA) {
+      _initializeMockData();
+      return;
+    }
+    
     _loadUserRole();
     fetchLogs();
   }
@@ -40,6 +51,74 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
     startDateController.dispose();
     endDateController.dispose();
     super.dispose();
+  }
+
+  // 🎬 MOCK DATA: Initialize perfect data for screenshots
+  void _initializeMockData() {
+    final now = DateTime.now();
+    
+    setState(() {
+      isLoading = false;
+      userRole = UserRole.owner;
+      availableUsers = ['owner@solardry.com', 'user@solardry.com'];
+      currentPage = 0;
+      
+      // Create mock activity logs
+      mockLogs = [
+        {
+          'message': 'Schedule started: Phase 1 (2h), Phase 2 (1h)',
+          'user': 'owner@solardry.com',
+          'timestamp': Timestamp.fromDate(now.subtract(const Duration(minutes: 5))),
+        },
+        {
+          'message': 'Lid opened manually',
+          'user': 'owner@solardry.com',
+          'timestamp': Timestamp.fromDate(now.subtract(const Duration(minutes: 15))),
+        },
+        {
+          'message': 'Manual override enabled',
+          'user': 'owner@solardry.com',
+          'timestamp': Timestamp.fromDate(now.subtract(const Duration(minutes: 20))),
+        },
+        {
+          'message': 'Temperature target set to 35.0°C',
+          'user': 'user@solardry.com',
+          'timestamp': Timestamp.fromDate(now.subtract(const Duration(hours: 1))),
+        },
+        {
+          'message': 'Schedule completed successfully',
+          'user': 'owner@solardry.com',
+          'timestamp': Timestamp.fromDate(now.subtract(const Duration(hours: 2))),
+        },
+        {
+          'message': 'Lid closed automatically',
+          'user': 'System',
+          'timestamp': Timestamp.fromDate(now.subtract(const Duration(hours: 3))),
+        },
+        {
+          'message': 'Rain detected - Lid closing',
+          'user': 'System',
+          'timestamp': Timestamp.fromDate(now.subtract(const Duration(hours: 4))),
+        },
+        {
+          'message': 'User logged in',
+          'user': 'user@solardry.com',
+          'timestamp': Timestamp.fromDate(now.subtract(const Duration(hours: 5))),
+        },
+        {
+          'message': 'System settings updated',
+          'user': 'owner@solardry.com',
+          'timestamp': Timestamp.fromDate(now.subtract(const Duration(hours: 6))),
+        },
+        {
+          'message': 'Battery charging started',
+          'user': 'System',
+          'timestamp': Timestamp.fromDate(now.subtract(const Duration(hours: 8))),
+        },
+      ];
+    });
+    
+    print('🎬 MOCK DATA: Activity Log initialized with ${mockLogs.length} mock entries');
   }
 
   Future<void> _loadUserRole() async {
@@ -130,6 +209,13 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
     final start = currentPage * pageSize;
     final end = start + pageSize;
     return allLogs.sublist(start, end > allLogs.length ? allLogs.length : end);
+  }
+
+  // 🎬 MOCK DATA: Get paginated mock logs
+  List<Map<String, dynamic>> get paginatedMockLogs {
+    final start = currentPage * pageSize;
+    final end = start + pageSize;
+    return mockLogs.sublist(start, end > mockLogs.length ? mockLogs.length : end);
   }
 
   String formatTimestamp(Timestamp? ts) {
@@ -364,7 +450,7 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
                       valueColor: AlwaysStoppedAnimation<Color>(Colors.amber),
                     ),
                   )
-                : allLogs.isEmpty
+                : (USE_MOCK_DATA ? mockLogs.isEmpty : allLogs.isEmpty)
                       ? Center(
                           child: Column(
                             mainAxisAlignment: MainAxisAlignment.center,
@@ -382,14 +468,20 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
                           children: [
                             Expanded(
                               child: RefreshIndicator(
-                                onRefresh: fetchLogs,
+                                onRefresh: USE_MOCK_DATA ? () async {} : fetchLogs,
                                 child: ListView.builder(
-                                  itemCount: paginatedLogs.length,
+                                  itemCount: USE_MOCK_DATA ? paginatedMockLogs.length : paginatedLogs.length,
                                   itemBuilder: (context, index) {
-                              final log = paginatedLogs[index];
-                              final message = log['message'] ?? 'No message';
-                              final user = log['user'] ?? 'Unknown user';
-                              final timestamp = formatTimestamp(log['timestamp']);
+                              // 🎬 MOCK DATA: Use mock logs or real logs
+                              final message = USE_MOCK_DATA 
+                                  ? paginatedMockLogs[index]['message'] ?? 'No message'
+                                  : paginatedLogs[index]['message'] ?? 'No message';
+                              final user = USE_MOCK_DATA
+                                  ? paginatedMockLogs[index]['user'] ?? 'Unknown user'
+                                  : paginatedLogs[index]['user'] ?? 'Unknown user';
+                              final timestamp = USE_MOCK_DATA
+                                  ? formatTimestamp(paginatedMockLogs[index]['timestamp'])
+                                  : formatTimestamp(paginatedLogs[index]['timestamp']);
                               return Container(
                                 margin: const EdgeInsets.only(bottom: 12),
                                 padding: const EdgeInsets.all(16),
@@ -429,10 +521,10 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
                                           ),
                                         ),
                                         // Delete button - Only visible to Owner and Admin
-                                        if (userRole == UserRole.owner || userRole == UserRole.admin)
+                                        if (!USE_MOCK_DATA && (userRole == UserRole.owner || userRole == UserRole.admin))
                                           IconButton(
                                             icon: const Icon(Icons.delete, color: Colors.red, size: 20),
-                                            onPressed: () => deleteLog(log),
+                                            onPressed: () => deleteLog(paginatedLogs[index]),
                                             tooltip: 'Delete log',
                                           ),
                                       ],
@@ -484,7 +576,7 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
                                 ),
                               ),
                             ),
-                            if (allLogs.length > pageSize)
+                            if ((USE_MOCK_DATA ? mockLogs.length : allLogs.length) > pageSize)
                               Container(
                                 margin: const EdgeInsets.only(top: 8),
                                 padding: const EdgeInsets.symmetric(vertical: 8),
@@ -501,11 +593,11 @@ class _ActivityLogScreenState extends State<ActivityLogScreen> {
                                       tooltip: 'Previous',
                                     ),
                                     Text(
-                                      'Page ${currentPage + 1} of ${(allLogs.length / pageSize).ceil()}',
+                                      'Page ${currentPage + 1} of ${((USE_MOCK_DATA ? mockLogs.length : allLogs.length) / pageSize).ceil()}',
                                       style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
                                     ),
                                     IconButton(
-                                      onPressed: (currentPage + 1) * pageSize < allLogs.length
+                                      onPressed: (currentPage + 1) * pageSize < (USE_MOCK_DATA ? mockLogs.length : allLogs.length)
                                           ? () => setState(() => currentPage++)
                                           : null,
                                       icon: const Icon(Icons.arrow_forward, color: Colors.amber),

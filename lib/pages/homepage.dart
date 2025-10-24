@@ -1,3 +1,4 @@
+import 'dart:async';
 import '../barrel.dart';
 
 class HomePage extends StatefulWidget {
@@ -10,6 +11,119 @@ class HomePage extends StatefulWidget {
 class _HomePageState extends State<HomePage> {
   int _selectedIndex = 0;
   final List<String> _screenTitles = ['Dashboard', 'Schedule', 'Activity Log'];
+  final ConnectionMonitorService _connectionMonitor = ConnectionMonitorService();
+  bool _dialogShown = false;
+  
+  // Stale data detection
+  int _lastUpdateTimestamp = 0;
+  bool _isOnline = false;
+  bool _firebaseOnlineStatus = false;  // Track Firebase's reported status separately
+  Timer? _freshnessTimer;
+  
+  // Cache streams to prevent "already listened to" error
+  late final Stream<DatabaseEvent> _userProfileStream;
+  late final Stream<DatabaseEvent> _systemOnlineStream;
+  late final Stream<DatabaseEvent> _lastUpdateStream;
+
+  @override
+  void initState() {
+    super.initState();
+    _connectionMonitor.startMonitoring();
+    _connectionMonitor.addListener(_onConnectionChanged);
+    
+    // Initialize broadcast streams once
+    _userProfileStream = FirebaseDatabase.instance
+        .ref('users/${FirebaseAuth.instance.currentUser?.uid}/profile')
+        .onValue
+        .asBroadcastStream();
+    
+    _systemOnlineStream = FirebaseDatabase.instance
+        .ref('hardwareSystems/${widget.systemId}/status/online')
+        .onValue
+        .asBroadcastStream();
+    
+    _lastUpdateStream = FirebaseDatabase.instance
+        .ref('hardwareSystems/${widget.systemId}/status/lastUpdate')
+        .onValue
+        .asBroadcastStream();
+    
+    // Listen to lastUpdate for stale detection
+    _lastUpdateStream.listen((event) {
+      final timestamp = event.snapshot.value;
+      if (timestamp != null && mounted) {
+        setState(() {
+          _lastUpdateTimestamp = timestamp is int ? timestamp : int.tryParse(timestamp.toString()) ?? 0;
+          // Update online status when timestamp changes
+          _updateOnlineStatus();
+        });
+      }
+    });
+    
+    // Listen to online status from Firebase
+    _systemOnlineStream.listen((event) {
+      if (mounted) {
+        final firebaseOnline = event.snapshot.value == true;
+        setState(() {
+          _firebaseOnlineStatus = firebaseOnline;
+          // Update _isOnline based on Firebase status and data freshness
+          _updateOnlineStatus();
+        });
+      }
+    });
+    
+    // Check data freshness every 3 seconds
+    _freshnessTimer = Timer.periodic(const Duration(seconds: 3), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      _checkDataFreshness();
+    });
+  }
+  
+  void _checkDataFreshness() {
+    if (mounted) {
+      setState(() {
+        _updateOnlineStatus();
+      });
+    }
+  }
+  
+  void _updateOnlineStatus() {
+    // Determine online status based on Firebase status AND data freshness
+    if (_lastUpdateTimestamp == 0) {
+      // No timestamp received yet, use Firebase status
+      _isOnline = _firebaseOnlineStatus;
+      return;
+    }
+    
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final difference = now - _lastUpdateTimestamp;
+    
+    // Consider data stale if no update in last 60 seconds
+    final isDataFresh = difference <= 60000;
+    
+    // System is online only if Firebase says online AND data is fresh
+    _isOnline = _firebaseOnlineStatus && isDataFresh;
+  }
+
+  void _onConnectionChanged() {
+    if (!mounted) return;
+    
+    if (!_connectionMonitor.isConnected && !_dialogShown) {
+      _dialogShown = true;
+      ConnectionMonitorService.showConnectionLostDialog(context).then((_) {
+        _dialogShown = false;
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    _connectionMonitor.removeListener(_onConnectionChanged);
+    _freshnessTimer?.cancel();
+    super.dispose();
+  }
 
   Widget _getScreen(int index) {
     switch (index) {
@@ -54,47 +168,40 @@ class _HomePageState extends State<HomePage> {
           ),
         ),
         actions: [
-          StreamBuilder<DatabaseEvent>(
-            stream: FirebaseDatabase.instance
-                .ref('hardwareSystems/${widget.systemId}/status/online')
-                .onValue,
-            builder: (context, snapshot) {
-              final isOnline = snapshot.data?.snapshot.value == true;
-              return Container(
-                margin: const EdgeInsets.only(right: 8),
-                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                decoration: BoxDecoration(
-                  color: isOnline ? Colors.green.withOpacity(0.2) : Colors.red.withOpacity(0.2),
-                  borderRadius: BorderRadius.circular(12),
-                  border: Border.all(
-                    color: isOnline ? Colors.green : Colors.red,
-                    width: 1,
+          // Online/Offline indicator with stale detection
+          Container(
+            margin: const EdgeInsets.only(right: 8),
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: _isOnline ? Colors.green.withOpacity(0.2) : Colors.red.withOpacity(0.2),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(
+                color: _isOnline ? Colors.green : Colors.red,
+                width: 1,
+              ),
+            ),
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Container(
+                  width: 6,
+                  height: 6,
+                  decoration: BoxDecoration(
+                    color: _isOnline ? Colors.green : Colors.red,
+                    shape: BoxShape.circle,
                   ),
                 ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Container(
-                      width: 6,
-                      height: 6,
-                      decoration: BoxDecoration(
-                        color: isOnline ? Colors.green : Colors.red,
-                        shape: BoxShape.circle,
-                      ),
-                    ),
-                    const SizedBox(width: 4),
-                    Text(
-                      isOnline ? 'Online' : 'Offline',
-                      style: TextStyle(
-                        color: isOnline ? Colors.green : Colors.red,
-                        fontSize: 10,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
+                const SizedBox(width: 4),
+                Text(
+                  _isOnline ? 'Online' : 'Offline',
+                  style: TextStyle(
+                    color: _isOnline ? Colors.green : Colors.red,
+                    fontSize: 10,
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
-              );
-            },
+              ],
+            ),
           ),
           IconButton(
             icon: const Icon(Icons.notifications_outlined, color: Colors.amber),
@@ -192,9 +299,7 @@ class _HomePageState extends State<HomePage> {
         children: [
           // Header with gradient and user info
           StreamBuilder<DatabaseEvent>(
-            stream: FirebaseDatabase.instance
-                .ref('users/${FirebaseAuth.instance.currentUser?.uid}/profile')
-                .onValue,
+            stream: _userProfileStream,
             builder: (context, snapshot) {
               final profile = snapshot.data?.snapshot.value as Map<dynamic, dynamic>?;
               final firstName = profile?['firstName'] ?? '';
@@ -222,19 +327,6 @@ class _HomePageState extends State<HomePage> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.white.withOpacity(0.2),
-                        shape: BoxShape.circle,
-                      ),
-                      child: const Icon(
-                        Icons.person,
-                        size: 40,
-                        color: Colors.black87,
-                      ),
-                    ),
-                    const SizedBox(height: 16),
                     Text(
                       fullName.isEmpty ? "User" : fullName,
                       style: const TextStyle(
@@ -357,6 +449,14 @@ class _HomePageState extends State<HomePage> {
                   onTap: () {
                     Navigator.pop(context);
                     Navigator.pushNamed(context, '/monitor', arguments: widget.systemId);
+                  },
+                ),
+                _buildDrawerItem(
+                  icon: Icons.build_circle_outlined,
+                  title: 'Hardware Testing',
+                  onTap: () {
+                    Navigator.pop(context);
+                    Navigator.pushNamed(context, '/hardware_test', arguments: widget.systemId);
                   },
                 ),
                 _buildDrawerItem(

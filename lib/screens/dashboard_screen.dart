@@ -2,6 +2,7 @@ import 'dart:async';
 import '../barrel.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import '../pages/login_page.dart';
+import '../widgets/connection_status_widget.dart';
 
 class DashboardScreen extends StatefulWidget {
   final String systemId;
@@ -15,23 +16,31 @@ class _DashboardScreenState extends State<DashboardScreen> {
   late final DatabaseReference systemRef;
   UserRole? userRole;
 
+  // 🎬 SCREENSHOT MODE: Set to true to use mock data for all sensors/controllers
+  static const bool USE_MOCK_DATA = true;  // ⚠️ Change to false for real data
+
   bool lidClosed = false;
+  bool manualOverride = false;  // NEW: Manual override status
+  bool megaConnected = false;   // NEW: MEGA connection status
   
   // 4 SHT31 sensors
   List<double> temps = [0.0, 0.0, 0.0, 0.0];
   List<double> hums = [0.0, 0.0, 0.0, 0.0];
   List<bool> shtConnected = [false, false, false, false];
+  List<bool> shtWorking = [false, false, false, false];  // Track working status separately
   
   // Average temp and humidity for dashboard display
   double avgTemp = 0.0;
   double avgHum = 0.0;
   int workingSensors = 0;
   
-  // Additional sensors
-  bool raindropConnected = false;
-  int raindropValue = 0;
-  bool ldrConnected = false;
-  int ldrValue = 0;
+  // Rain sensors (4 sensors)
+  List<bool> rainWorking = [false, false, false, false];
+  int workingRainSensors = 0;
+  
+  // Light sensors (4 sensors)
+  List<bool> lightWorking = [false, false, false, false];
+  int workingLightSensors = 0;
   
   int batteryPct = 0;
   bool isCharging = false;
@@ -48,6 +57,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
   String errorCode = '';
   String errorMessage = '';
   bool online = false;
+  int lastUpdateTimestamp = 0;
+  bool isDataStale = false;
 
   // Stream subscriptions for proper disposal
   final List<StreamSubscription> _subscriptions = [];
@@ -58,6 +69,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
     systemRef = FirebaseDatabase.instance.ref(
       'hardwareSystems/${widget.systemId}',
     );
+    
+    // 🎬 MOCK DATA: Initialize with perfect screenshot data
+    if (USE_MOCK_DATA) {
+      _initializeMockData();
+      return; // Skip Firebase listeners
+    }
     
     // Load user role
     _loadUserRole();
@@ -96,12 +113,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }),
     );
 
-    // Listen to all 4 SHT31 sensors
+    // Listen to all 4 SHT31 sensors (NEW structure: sensors/tempHumid/1/value/temp)
     for (int i = 0; i < 4; i++) {
       final sensorNum = i + 1;
       
       _subscriptions.add(
-        systemRef.child('sensors/sht31_$sensorNum/temp').onValue.listen((event) {
+        systemRef.child('sensors/tempHumid/$sensorNum/value/temp').onValue.listen((event) {
           if (mounted) {
             final temp = event.snapshot.value;
             setState(() {
@@ -115,7 +132,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
 
       _subscriptions.add(
-        systemRef.child('sensors/sht31_$sensorNum/hum').onValue.listen((event) {
+        systemRef.child('sensors/tempHumid/$sensorNum/value/hum').onValue.listen((event) {
           if (mounted) {
             final hum = event.snapshot.value;
             setState(() {
@@ -129,7 +146,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
 
       _subscriptions.add(
-        systemRef.child('sensors/sht31_$sensorNum/connected').onValue.listen((event) {
+        systemRef.child('sensors/tempHumid/$sensorNum/connected').onValue.listen((event) {
           if (mounted) {
             setState(() {
               shtConnected[i] = event.snapshot.value == true;
@@ -138,11 +155,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
           }
         }),
       );
+
+      _subscriptions.add(
+        systemRef.child('sensors/tempHumid/$sensorNum/working').onValue.listen((event) {
+          if (mounted) {
+            setState(() {
+              shtWorking[i] = event.snapshot.value == true;
+              _calculateAverages();
+            });
+          }
+        }),
+      );
     }
 
-    // Battery
+    // Battery (NEW structure: sensors/battery/percentage)
     _subscriptions.add(
-      systemRef.child('status/battery').onValue.listen((event) {
+      systemRef.child('sensors/battery/percentage').onValue.listen((event) {
         if (mounted) {
           final battery = event.snapshot.value;
           setState(() {
@@ -155,7 +183,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
     );
 
     _subscriptions.add(
-      systemRef.child('status/isCharging').onValue.listen((event) {
+      systemRef.child('sensors/battery/charging').onValue.listen((event) {
         if (mounted) {
           setState(() {
             isCharging = event.snapshot.value == true;
@@ -164,49 +192,57 @@ class _DashboardScreenState extends State<DashboardScreen> {
       }),
     );
 
-    // Raindrop sensor
+    // NEW: Listen to manual override status
     _subscriptions.add(
-      systemRef.child('sensors/raindrop/connected').onValue.listen((event) {
+      systemRef.child('status/manualOverride').onValue.listen((event) {
         if (mounted) {
           setState(() {
-            raindropConnected = event.snapshot.value == true;
+            manualOverride = event.snapshot.value == true;
           });
         }
       }),
     );
 
+    // NEW: Listen to MEGA connection status
     _subscriptions.add(
-      systemRef.child('sensors/raindrop/value').onValue.listen((event) {
+      systemRef.child('status/megaConnected').onValue.listen((event) {
         if (mounted) {
-          final val = event.snapshot.value;
           setState(() {
-            raindropValue = val is int ? val : int.tryParse(val.toString()) ?? 0;
+            megaConnected = event.snapshot.value == true;
           });
         }
       }),
     );
 
-    // LDR sensor
-    _subscriptions.add(
-      systemRef.child('sensors/ldr/connected').onValue.listen((event) {
-        if (mounted) {
-          setState(() {
-            ldrConnected = event.snapshot.value == true;
-          });
-        }
-      }),
-    );
+    // Listen to all 4 Rain sensors
+    for (int i = 0; i < 4; i++) {
+      final sensorNum = i + 1;
+      _subscriptions.add(
+        systemRef.child('sensors/rain/$sensorNum/working').onValue.listen((event) {
+          if (mounted) {
+            setState(() {
+              rainWorking[i] = event.snapshot.value == true;
+              workingRainSensors = rainWorking.where((w) => w).length;
+            });
+          }
+        }),
+      );
+    }
 
-    _subscriptions.add(
-      systemRef.child('sensors/ldr/value').onValue.listen((event) {
-        if (mounted) {
-          final val = event.snapshot.value;
-          setState(() {
-            ldrValue = val is int ? val : int.tryParse(val.toString()) ?? 0;
-          });
-        }
-      }),
-    );
+    // Listen to all 4 Light sensors
+    for (int i = 0; i < 4; i++) {
+      final sensorNum = i + 1;
+      _subscriptions.add(
+        systemRef.child('sensors/light/$sensorNum/working').onValue.listen((event) {
+          if (mounted) {
+            setState(() {
+              lightWorking[i] = event.snapshot.value == true;
+              workingLightSensors = lightWorking.where((w) => w).length;
+            });
+          }
+        }),
+      );
+    }
 
     // Safety status
     _subscriptions.add(
@@ -239,6 +275,115 @@ class _DashboardScreenState extends State<DashboardScreen> {
         if (mounted) setState(() => errorMessage = event.snapshot.value?.toString() ?? '');
       }),
     );
+
+    // Listen to lastUpdate timestamp to detect stale data
+    _subscriptions.add(
+      systemRef.child('status/lastUpdate').onValue.listen((event) {
+        if (mounted) {
+          final timestamp = event.snapshot.value;
+          if (timestamp != null) {
+            setState(() {
+              lastUpdateTimestamp = timestamp is int ? timestamp : int.tryParse(timestamp.toString()) ?? 0;
+              _checkDataFreshness();
+            });
+          }
+        }
+      }),
+    );
+
+    // Check data freshness every 3 seconds
+    Timer.periodic(const Duration(seconds: 3), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      _checkDataFreshness();
+    });
+  }
+
+  // 🎬 MOCK DATA: Initialize perfect data for screenshots
+  void _initializeMockData() {
+    setState(() {
+      // System status - all online and working
+      online = true;
+      megaConnected = true;
+      lidClosed = false;
+      manualOverride = false;
+      
+      // Current operation
+      currentPhase = 'Drying';
+      lastAction = 'Lid opened at 10:15 AM';
+      remainingTime = 180; // 3 hours remaining
+      
+      // All 4 temperature & humidity sensors working perfectly
+      temps = [32.5, 33.2, 31.8, 32.9];
+      hums = [45.0, 43.5, 46.2, 44.8];
+      shtConnected = [true, true, true, true];
+      shtWorking = [true, true, true, true];
+      
+      // All 4 rain sensors working
+      rainWorking = [true, true, true, true];
+      workingRainSensors = 4;
+      
+      // All 4 light sensors working
+      lightWorking = [true, true, true, true];
+      workingLightSensors = 4;
+      
+      // Battery at good level and charging
+      batteryPct = 85;
+      isCharging = true;
+      
+      // Safety - all good
+      safetyOK = true;
+      safetyMessage = 'All systems normal';
+      hasError = false;
+      errorCode = '';
+      errorMessage = '';
+      
+      // Fresh data
+      lastUpdateTimestamp = DateTime.now().millisecondsSinceEpoch;
+      isDataStale = false;
+      
+      // Calculate averages
+      _calculateAverages();
+    });
+    
+    // Mock user role with full control
+    userRole = UserRole.owner;
+    
+    print('🎬 MOCK DATA: Dashboard initialized with perfect screenshot data');
+  }
+
+  void _checkDataFreshness() {
+    if (lastUpdateTimestamp == 0) {
+      print('⚠️ Dashboard: No timestamp received yet');
+      setState(() => isDataStale = false);
+      return;
+    }
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final lastUpdate = DateTime.fromMillisecondsSinceEpoch(lastUpdateTimestamp);
+    final difference = now - lastUpdateTimestamp;
+
+    print('🔍 Dashboard: Last update ${(difference / 1000).toStringAsFixed(1)}s ago | Online: $online | Stale: ${difference > 120000}');
+
+    // Consider data stale if no update in last 120 seconds (increased for stability)
+    final stale = difference > 120000;
+
+    if (isDataStale != stale) {
+      setState(() {
+        isDataStale = stale;
+        if (stale) {
+          // Data is stale - mark as offline
+          print('❌ Dashboard: Marking system as OFFLINE (stale data)');
+          online = false;
+        } else if (!stale && !online) {
+          // Data is fresh again - mark as online
+          print('✅ Dashboard: Marking system as ONLINE (fresh data)');
+          online = true;
+        }
+      });
+    }
   }
 
   @override
@@ -252,6 +397,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
 
   Future<void> _loadUserRole() async {
     final role = await PermissionService.getUserRole(widget.systemId);
+    print('🔐 Dashboard - User Role: $role');
+    print('🔐 Dashboard - Can Control: ${role.canControl}');
+    print('🔐 Dashboard - System ID: ${widget.systemId}');
     if (mounted) {
       setState(() => userRole = role);
     }
@@ -264,7 +412,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
     int working = 0;
     
     for (int i = 0; i < 4; i++) {
-      if (shtConnected[i]) {
+      // Sensor must be both connected AND working to count
+      if (shtConnected[i] && shtWorking[i]) {
         totalTemp += temps[i];
         totalHum += hums[i];
         working++;
@@ -282,6 +431,42 @@ class _DashboardScreenState extends State<DashboardScreen> {
   }
 
   Future<void> toggleLid() async {
+    print('🔘 Lid button clicked!');
+    print('🔐 User Role: $userRole');
+    print('🔐 Can Control: ${userRole?.canControl}');
+    print('🌐 Online: $online');
+    
+    if (userRole == null || !userRole!.canControl) {
+      print('❌ Permission denied: userRole=${userRole}, canControl=${userRole?.canControl}');
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text("You don't have permission to control this system"),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+    final newMode = lidClosed ? 'open' : 'close';
+    print('📤 Sending lid command: $newMode');
+    await systemRef.child('controls/mode').set(newMode);
+    print('✅ Lid command sent successfully');
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text('Lid ${newMode == "open" ? "opening" : "closing"} command sent'),
+          backgroundColor: Colors.green,
+          duration: const Duration(seconds: 2),
+        ),
+      );
+    }
+  }
+
+  // NEW: Toggle manual override
+  Future<void> toggleManualOverride() async {
+    print('🔓 Manual Override button clicked!');
+    print('🔐 User Role: $userRole');
+    
     if (userRole == null || !userRole!.canControl) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -291,9 +476,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
       );
       return;
     }
-    systemRef.child('controls/mode').set(lidClosed ? 'open' : 'close');
+    
+    final newState = manualOverride ? 'disable' : 'enable';
+    print('📤 Sending manual override command: $newState');
+    await systemRef.child('controls/override').set(newState);
+    print('✅ Manual override command sent successfully');
+    
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            manualOverride 
+              ? '🔒 Manual Override DISABLED' 
+              : '🔓 Manual Override ENABLED - Auto control disabled'
+          ),
+          backgroundColor: manualOverride ? Colors.green : Colors.orange,
+          duration: const Duration(seconds: 3),
+        ),
+      );
+    }
   }
-
 
   @override
   Widget build(BuildContext context) {
@@ -509,11 +711,66 @@ class _DashboardScreenState extends State<DashboardScreen> {
           // Controls Section
           _sectionTitle('Controls'),
           const SizedBox(height: 12),
+          
+          // Manual Override Warning Banner
+          if (manualOverride)
+            Container(
+              padding: const EdgeInsets.all(16),
+              margin: const EdgeInsets.only(bottom: 12),
+              decoration: BoxDecoration(
+                color: Colors.orange.withOpacity(0.2),
+                border: Border.all(color: Colors.orange, width: 2),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Row(
+                children: [
+                  const Icon(Icons.lock_open, color: Colors.orange, size: 28),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        const Text(
+                          '🔓 Manual Override Active',
+                          style: TextStyle(
+                            color: Colors.orange,
+                            fontWeight: FontWeight.bold,
+                            fontSize: 16,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          'Automatic control disabled • Auto-disables after 15 min',
+                          style: TextStyle(
+                            color: Colors.orange.shade300,
+                            fontSize: 12,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          
           _controlCard(
             'Lid',
             !lidClosed,
             Icons.door_front_door,
             toggleLid,
+          ),
+          const SizedBox(height: 12),
+          
+          // NEW: Manual Override Control
+          _controlCard(
+            'Manual Override',
+            manualOverride,
+            manualOverride ? Icons.lock : Icons.lock_open,
+            toggleManualOverride,
+            subtitle: manualOverride 
+              ? 'Tap to disable' 
+              : 'Tap to enable - Disables auto control',
+            color: manualOverride ? Colors.orange : Colors.blue,
           ),
           const SizedBox(height: 24),
 
@@ -619,33 +876,45 @@ class _DashboardScreenState extends State<DashboardScreen> {
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(
-                    color: workingSensors == 4 
-                        ? Colors.green.withOpacity(0.1) 
-                        : Colors.red.withOpacity(0.1),
+                    color: !online
+                        ? Colors.grey.withOpacity(0.1)
+                        : workingSensors == 4 
+                            ? Colors.green.withOpacity(0.1) 
+                            : Colors.red.withOpacity(0.1),
                     borderRadius: BorderRadius.circular(8),
                     border: Border.all(
-                      color: workingSensors == 4 
-                          ? Colors.green.withOpacity(0.3) 
-                          : Colors.red.withOpacity(0.3),
+                      color: !online
+                          ? Colors.grey.withOpacity(0.3)
+                          : workingSensors == 4 
+                              ? Colors.green.withOpacity(0.3) 
+                              : Colors.red.withOpacity(0.3),
                     ),
                   ),
                   child: Row(
                     children: [
                       Icon(
-                        workingSensors == 4 ? Icons.check_circle : Icons.warning,
-                        color: workingSensors == 4 ? Colors.green : Colors.red,
+                        !online 
+                            ? Icons.cloud_off
+                            : workingSensors == 4 ? Icons.check_circle : Icons.warning,
+                        color: !online
+                            ? Colors.grey
+                            : workingSensors == 4 ? Colors.green : Colors.red,
                         size: 20,
                       ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
-                          workingSensors == 4
-                              ? 'All sensors working'
-                              : workingSensors == 0
-                                  ? 'All sensors are not working'
-                                  : '${4 - workingSensors} ${4 - workingSensors == 1 ? 'sensor is' : 'sensors are'} not working',
+                          !online
+                              ? 'System offline - No sensor data'
+                              : workingSensors == 4
+                                  ? 'All sensors working'
+                                  : workingSensors == 0
+                                      ? 'All sensors are not working'
+                                      : '${4 - workingSensors} ${4 - workingSensors == 1 ? 'sensor is' : 'sensors are'} not working',
                           style: TextStyle(
-                            color: workingSensors == 4 ? Colors.green : Colors.red,
+                            color: !online
+                                ? Colors.grey
+                                : workingSensors == 4 ? Colors.green : Colors.red,
                             fontSize: 13,
                             fontWeight: FontWeight.w500,
                           ),
@@ -659,159 +928,155 @@ class _DashboardScreenState extends State<DashboardScreen> {
           ),
           const SizedBox(height: 16),
           
-          // Raindrop Sensor Card
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E2235),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: raindropConnected ? Colors.green.withOpacity(0.3) : Colors.red.withOpacity(0.3),
-              ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.blue.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(Icons.water_drop, color: Colors.blue, size: 28),
-                    ),
-                    const SizedBox(width: 16),
-                    const Expanded(
-                      child: Text(
-                        'Raindrop Sensor',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                
-                // Status message
-                Container(
-                  padding: const EdgeInsets.all(12),
+          // Other Sensors - Compact Status Row
+          Row(
+            children: [
+              // Rain Sensors Status
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: raindropConnected 
-                        ? Colors.green.withOpacity(0.1) 
-                        : Colors.red.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
+                    color: const Color(0xFF1E2235),
+                    borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: raindropConnected 
+                      color: workingRainSensors == 4 
                           ? Colors.green.withOpacity(0.3) 
-                          : Colors.red.withOpacity(0.3),
+                          : Colors.orange.withOpacity(0.3),
                     ),
                   ),
-                  child: Row(
+                  child: Column(
                     children: [
                       Icon(
-                        raindropConnected ? Icons.check_circle : Icons.warning,
-                        color: raindropConnected ? Colors.green : Colors.red,
-                        size: 20,
+                        Icons.water_drop,
+                        color: !online ? Colors.grey : (workingRainSensors == 4 ? Colors.blue : Colors.orange),
+                        size: 32,
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          raindropConnected ? 'Sensor working' : 'Sensor is not working',
+                      const SizedBox(height: 8),
+                      Text(
+                        'Rain Sensors',
+                        style: TextStyle(
+                          color: Colors.grey.shade400,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      if (!online)
+                        Text(
+                          'Offline',
                           style: TextStyle(
-                            color: raindropConnected ? Colors.green : Colors.red,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
+                            color: Colors.grey.shade600,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
                           ),
+                        )
+                      else
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              '$workingRainSensors',
+                              style: TextStyle(
+                                color: workingRainSensors == 4 ? Colors.green : Colors.orange,
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              '/4',
+                              style: TextStyle(
+                                color: Colors.grey.shade600,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      const SizedBox(height: 4),
+                      Text(
+                        !online ? 'System Offline' : (workingRainSensors == 4 ? 'All Online' : 'Some Offline'),
+                        style: TextStyle(
+                          color: !online ? Colors.grey.shade600 : (workingRainSensors == 4 ? Colors.green : Colors.orange),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
                     ],
                   ),
                 ),
-              ],
-            ),
-          ),
-          const SizedBox(height: 16),
-          
-          // LDR Sensor Card
-          Container(
-            padding: const EdgeInsets.all(20),
-            decoration: BoxDecoration(
-              color: const Color(0xFF1E2235),
-              borderRadius: BorderRadius.circular(16),
-              border: Border.all(
-                color: ldrConnected ? Colors.green.withOpacity(0.3) : Colors.red.withOpacity(0.3),
               ),
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: [
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: Colors.yellow.withOpacity(0.2),
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      child: const Icon(Icons.light_mode, color: Colors.yellow, size: 28),
-                    ),
-                    const SizedBox(width: 16),
-                    const Expanded(
-                      child: Text(
-                        'Light Sensor (LDR)',
-                        style: TextStyle(
-                          color: Colors.white,
-                          fontSize: 18,
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                
-                // Status message
-                Container(
-                  padding: const EdgeInsets.all(12),
+              const SizedBox(width: 16),
+              // Light Sensors Status
+              Expanded(
+                child: Container(
+                  padding: const EdgeInsets.all(16),
                   decoration: BoxDecoration(
-                    color: ldrConnected 
-                        ? Colors.green.withOpacity(0.1) 
-                        : Colors.red.withOpacity(0.1),
-                    borderRadius: BorderRadius.circular(8),
+                    color: const Color(0xFF1E2235),
+                    borderRadius: BorderRadius.circular(16),
                     border: Border.all(
-                      color: ldrConnected 
+                      color: workingLightSensors == 4 
                           ? Colors.green.withOpacity(0.3) 
-                          : Colors.red.withOpacity(0.3),
+                          : Colors.orange.withOpacity(0.3),
                     ),
                   ),
-                  child: Row(
+                  child: Column(
                     children: [
                       Icon(
-                        ldrConnected ? Icons.check_circle : Icons.warning,
-                        color: ldrConnected ? Colors.green : Colors.red,
-                        size: 20,
+                        Icons.light_mode,
+                        color: !online ? Colors.grey : (workingLightSensors == 4 ? Colors.yellow : Colors.orange),
+                        size: 32,
                       ),
-                      const SizedBox(width: 8),
-                      Expanded(
-                        child: Text(
-                          ldrConnected ? 'Sensor working' : 'Sensor is not working',
+                      const SizedBox(height: 8),
+                      Text(
+                        'Light Sensors',
+                        style: TextStyle(
+                          color: Colors.grey.shade400,
+                          fontSize: 12,
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      if (!online)
+                        Text(
+                          'Offline',
                           style: TextStyle(
-                            color: ldrConnected ? Colors.green : Colors.red,
-                            fontSize: 13,
-                            fontWeight: FontWeight.w500,
+                            color: Colors.grey.shade600,
+                            fontSize: 20,
+                            fontWeight: FontWeight.bold,
                           ),
+                        )
+                      else
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(
+                              '$workingLightSensors',
+                              style: TextStyle(
+                                color: workingLightSensors == 4 ? Colors.green : Colors.orange,
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                            Text(
+                              '/4',
+                              style: TextStyle(
+                                color: Colors.grey.shade600,
+                                fontSize: 16,
+                              ),
+                            ),
+                          ],
+                        ),
+                      const SizedBox(height: 4),
+                      Text(
+                        !online ? 'System Offline' : (workingLightSensors == 4 ? 'All Online' : 'Some Offline'),
+                        style: TextStyle(
+                          color: !online ? Colors.grey.shade600 : (workingLightSensors == 4 ? Colors.green : Colors.orange),
+                          fontSize: 11,
+                          fontWeight: FontWeight.w500,
                         ),
                       ),
                     ],
                   ),
                 ),
-              ],
-            ),
+              ),
+            ],
           ),
           const SizedBox(height: 24),
 
@@ -831,18 +1096,22 @@ class _DashboardScreenState extends State<DashboardScreen> {
           // Battery Status
           _statusCard(
             'Battery',
-            '$batteryPct% ${isCharging ? "(Charging)" : ""}',
-            isCharging 
-                ? Icons.battery_charging_full 
-                : batteryPct > 80 ? Icons.battery_full 
-                : batteryPct > 50 ? Icons.battery_5_bar 
-                : batteryPct > 20 ? Icons.battery_3_bar 
-                : Icons.battery_1_bar,
-            isCharging 
-                ? Colors.blue 
-                : batteryPct > 50 ? Colors.green 
-                : batteryPct > 20 ? Colors.orange 
-                : Colors.red,
+            !online ? 'Offline' : '$batteryPct% ${isCharging ? "(Charging)" : ""}',
+            !online 
+                ? Icons.battery_unknown
+                : isCharging 
+                    ? Icons.battery_charging_full 
+                    : batteryPct > 80 ? Icons.battery_full 
+                    : batteryPct > 50 ? Icons.battery_5_bar 
+                    : batteryPct > 20 ? Icons.battery_3_bar 
+                    : Icons.battery_1_bar,
+            !online
+                ? Colors.grey
+                : isCharging 
+                    ? Colors.blue 
+                    : batteryPct > 50 ? Colors.green 
+                    : batteryPct > 20 ? Colors.orange 
+                    : Colors.red,
           ),
         ],
       ),
@@ -864,19 +1133,27 @@ class _DashboardScreenState extends State<DashboardScreen> {
     String label,
     bool state,
     IconData icon,
-    VoidCallback onToggle,
-  ) {
+    VoidCallback onToggle, {
+    String? subtitle,
+    Color? color,
+  }) {
+    final activeColor = color ?? Colors.amber;
+    final displaySubtitle = subtitle ?? (state ? 'ON' : 'OFF');
+    
     return GestureDetector(
-      onTap: online ? onToggle : null,
+      onTap: online ? () {
+        print('👆 Control card tapped: $label | Online: $online');
+        onToggle();
+      } : null,
       child: Opacity(
         opacity: online ? 1.0 : 0.5,
         child: Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
-            color: state ? Colors.amber : const Color(0xFF1E2235),
+            color: state ? activeColor : const Color(0xFF1E2235),
             borderRadius: BorderRadius.circular(16),
             border: Border.all(
-              color: state ? Colors.amber.shade700 : Colors.grey.shade700,
+              color: state ? activeColor.withOpacity(0.7) : Colors.grey.shade700,
               width: 2,
             ),
           ),
@@ -885,24 +1162,26 @@ class _DashboardScreenState extends State<DashboardScreen> {
               Icon(
                 icon,
                 size: 32,
-                color: state ? Colors.black87 : Colors.grey.shade400,
+                color: state ? Colors.white : Colors.grey.shade400,
               ),
               const SizedBox(height: 8),
               Text(
                 label,
                 style: TextStyle(
                   fontWeight: FontWeight.bold,
-                  color: state ? Colors.black87 : Colors.white,
+                  color: state ? Colors.white : Colors.white,
                   fontSize: 16,
                 ),
+                textAlign: TextAlign.center,
               ),
               const SizedBox(height: 4),
               Text(
-                state ? 'ON' : 'OFF',
+                displaySubtitle,
                 style: TextStyle(
-                  color: state ? Colors.black54 : Colors.grey.shade500,
+                  color: state ? Colors.white70 : Colors.grey.shade500,
                   fontSize: 12,
                 ),
+                textAlign: TextAlign.center,
               ),
             ],
           ),

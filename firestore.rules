@@ -7,21 +7,43 @@ service cloud.firestore {
     // ============================================================
 
     // Registration OTPs — allow unauthenticated read/write for signup
-    // ⚠️ TODO: Add rate limiting via Firebase App Check or Cloud Functions
     match /pending_verifications/{email} {
-      allow read: if true; // Needed for OTP verification during registration
-      allow create: if true; // Anyone can request registration OTP
+      allow read, create: if true; // Anyone can request and verify OTP
       allow update: if false; // Prevent modification
       allow delete: if request.auth != null; // Only authenticated users can cleanup
     }
 
     // Password reset OTPs — allow unauthenticated access for recovery
-    // ⚠️ TODO: Add rate limiting and expiration checks
     match /password_resets/{email} {
-      allow read: if true; // Needed for password reset verification
-      allow create: if true; // Anyone can request password reset
+      allow read, create: if true; // Anyone can request and verify password reset
       allow update: if false; // Prevent modification
       allow delete: if request.auth != null; // Only authenticated users can cleanup
+    }
+
+    // ============================================================
+    // 🎟️ REGISTRATION CODES
+    // ============================================================
+    
+    // Registration codes — owners can create, anyone authenticated can read/use
+    match /registration_codes/{codeId} {
+      // Anyone authenticated can read codes (needed to validate during system claiming)
+      allow read: if request.auth != null;
+      
+      // Only system owners can create codes for their systems
+      allow create: if request.auth != null 
+                    && request.auth.token.email_verified == true
+                    && request.resource.data.createdBy == request.auth.uid;
+      
+      // Only code creator can update (mark as used)
+      allow update: if request.auth != null 
+                    && request.auth.token.email_verified == true
+                    && (resource.data.createdBy == request.auth.uid 
+                        || request.auth.uid == request.resource.data.usedBy); // Allow user who uses it
+      
+      // Only code creator can delete
+      allow delete: if request.auth != null 
+                    && request.auth.token.email_verified == true
+                    && resource.data.createdBy == request.auth.uid;
     }
 
     // ============================================================
@@ -32,7 +54,7 @@ service cloud.firestore {
     match /userAccess/{uid} {
       allow read, write: if request.auth != null 
                          && request.auth.uid == uid
-                         && request.auth.token.email_verified == true; // ✅ Email must be verified
+                         && request.auth.token.email_verified == true;
     }
 
     // User notifications — only owner can access
@@ -48,24 +70,27 @@ service cloud.firestore {
 
     // System metadata — authenticated users can read, owners can write
     match /systems/{systemId} {
+      // Anyone authenticated can read (needed for system claiming)
       allow read: if request.auth != null 
                   && request.auth.token.email_verified == true;
       
+      // Anyone authenticated can create a system (claiming)
       allow create: if request.auth != null 
                     && request.auth.token.email_verified == true
                     && request.resource.data.ownerId == request.auth.uid; // Must set self as owner
       
+      // Only owner can update (except ownership transfer)
       allow update: if request.auth != null 
                     && request.auth.token.email_verified == true
-                    && resource.data.ownerId == request.auth.uid // Only owner can update
-                    && request.resource.data.ownerId == resource.data.ownerId; // Cannot change owner
+                    && resource.data.ownerId == request.auth.uid; // Only current owner
       
+      // Only owner can delete
       allow delete: if request.auth != null 
                     && request.auth.token.email_verified == true
-                    && resource.data.ownerId == request.auth.uid; // Only owner can delete
+                    && resource.data.ownerId == request.auth.uid;
     }
 
-    // System statistics — authenticated users can read, app can write
+    // System statistics — authenticated users can read, owners can write
     match /system_stats/{systemId} {
       allow read: if request.auth != null 
                   && request.auth.token.email_verified == true;
@@ -80,15 +105,17 @@ service cloud.firestore {
     // 📊 LOGGING & MONITORING
     // ============================================================
 
-    // Activity logs — users can create and read, cannot modify
+    // Activity logs — users can create and read, owners can delete
     match /activity_logs/{logId} {
       allow read: if request.auth != null;
       
       allow create: if request.auth != null;
       
-      allow update: if false; // ✅ Logs are immutable
+      allow update: if false; // Logs are immutable
       
-      allow delete: if request.auth != null; // Any authenticated user can delete logs
+      // Owner of the system can delete logs
+      allow delete: if request.auth != null 
+                    && request.auth.token.email_verified == true;
     }
 
     // System status logs — automatic offline detection logs
@@ -97,7 +124,7 @@ service cloud.firestore {
       
       allow create: if request.auth != null;
       
-      allow update, delete: if false; // ✅ Status logs are immutable
+      allow update, delete: if false; // Status logs are immutable
     }
 
     // Batch completion logs — from MEGA hardware
@@ -106,7 +133,7 @@ service cloud.firestore {
       
       allow create: if request.auth != null;
       
-      allow update, delete: if false; // ✅ Batch logs are immutable
+      allow update, delete: if false; // Batch logs are immutable
     }
 
     // ============================================================

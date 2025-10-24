@@ -463,9 +463,10 @@ class AccountPage extends StatelessWidget {
                               ],
                             ),
                           ),
-                          Icon(
-                            Icons.chevron_right,
-                            color: Colors.grey.shade600,
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.red, size: 20),
+                            onPressed: () => _showDeleteSystemDialog(context, systemId.toString(), userId),
+                            tooltip: 'Remove System',
                           ),
                         ],
                       ),
@@ -676,5 +677,206 @@ class AccountPage extends StatelessWidget {
         );
       },
     );
+  }
+
+  // Show delete system dialog with password verification
+  static void _showDeleteSystemDialog(BuildContext context, String systemId, String userId) {
+    final passwordController = TextEditingController();
+    bool isDeleting = false;
+
+    showDialog(
+      context: context,
+      builder: (context) => StatefulBuilder(
+        builder: (context, setState) => AlertDialog(
+          backgroundColor: const Color(0xFF1E2235),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: Column(
+            children: [
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.red.withOpacity(0.2),
+                  shape: BoxShape.circle,
+                ),
+                child: const Icon(Icons.warning, color: Colors.red, size: 48),
+              ),
+              const SizedBox(height: 16),
+              const Text(
+                'Remove System',
+                style: TextStyle(color: Colors.white, fontSize: 20, fontWeight: FontWeight.bold),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Text(
+                'Are you sure you want to remove system "$systemId"?',
+                style: const TextStyle(color: Colors.white70, fontSize: 14),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Container(
+                padding: const EdgeInsets.all(12),
+                decoration: BoxDecoration(
+                  color: Colors.orange.withOpacity(0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border: Border.all(color: Colors.orange.withOpacity(0.3)),
+                ),
+                child: const Text(
+                  '⚠️ This will remove the system from your account. You can re-add it later using a registration code.',
+                  style: TextStyle(color: Colors.orange, fontSize: 12),
+                  textAlign: TextAlign.center,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextField(
+                controller: passwordController,
+                obscureText: true,
+                style: const TextStyle(color: Colors.white),
+                decoration: InputDecoration(
+                  labelText: 'Enter your password to confirm',
+                  labelStyle: const TextStyle(color: Colors.grey),
+                  prefixIcon: const Icon(Icons.lock, color: Colors.amber),
+                  filled: true,
+                  fillColor: const Color(0xFF141829),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide.none,
+                  ),
+                  enabledBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: BorderSide(color: Colors.grey.withOpacity(0.3)),
+                  ),
+                  focusedBorder: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(12),
+                    borderSide: const BorderSide(color: Colors.amber),
+                  ),
+                ),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: isDeleting ? null : () {
+                passwordController.dispose();
+                Navigator.pop(context);
+              },
+              child: const Text('Cancel', style: TextStyle(color: Colors.grey)),
+            ),
+            ElevatedButton(
+              onPressed: isDeleting ? null : () async {
+                if (passwordController.text.isEmpty) {
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(
+                      content: Text('Please enter your password'),
+                      backgroundColor: Colors.red,
+                    ),
+                  );
+                  return;
+                }
+
+                setState(() => isDeleting = true);
+
+                try {
+                  // Verify password by re-authenticating
+                  final user = FirebaseAuth.instance.currentUser;
+                  if (user == null || user.email == null) {
+                    throw Exception('User not logged in');
+                  }
+
+                  final credential = EmailAuthProvider.credential(
+                    email: user.email!,
+                    password: passwordController.text,
+                  );
+
+                  await user.reauthenticateWithCredential(credential);
+
+                  // Password verified, proceed with deletion
+                  await _deleteSystem(systemId, userId);
+
+                  passwordController.dispose();
+                  if (context.mounted) {
+                    Navigator.pop(context);
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('System "$systemId" removed successfully'),
+                        backgroundColor: Colors.green,
+                      ),
+                    );
+                  }
+                } on FirebaseAuthException catch (e) {
+                  setState(() => isDeleting = false);
+                  String errorMessage = 'Authentication failed';
+                  if (e.code == 'wrong-password') {
+                    errorMessage = 'Incorrect password';
+                  } else if (e.code == 'too-many-requests') {
+                    errorMessage = 'Too many attempts. Try again later';
+                  }
+                  
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text(errorMessage),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                } catch (e) {
+                  setState(() => isDeleting = false);
+                  if (context.mounted) {
+                    ScaffoldMessenger.of(context).showSnackBar(
+                      SnackBar(
+                        content: Text('Error: $e'),
+                        backgroundColor: Colors.red,
+                      ),
+                    );
+                  }
+                }
+              },
+              style: ElevatedButton.styleFrom(
+                backgroundColor: Colors.red,
+                foregroundColor: Colors.white,
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(12),
+                ),
+              ),
+              child: isDeleting
+                  ? const SizedBox(
+                      width: 20,
+                      height: 20,
+                      child: CircularProgressIndicator(
+                        strokeWidth: 2,
+                        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+                      ),
+                    )
+                  : const Text('Remove System'),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // Delete system from user's account
+  static Future<void> _deleteSystem(String systemId, String userId) async {
+    final dbRef = FirebaseDatabase.instance.ref();
+    
+    // Remove from user's owned systems
+    await dbRef.child('users/$userId/ownedSystems/$systemId').remove();
+    
+    // Remove system ownership from hardwareSystems
+    await dbRef.child('hardwareSystems/$systemId/ownerId').remove();
+    await dbRef.child('hardwareSystems/$systemId/ownerEmail').remove();
+    await dbRef.child('hardwareSystems/$systemId/ownerName').remove();
+    
+    // Log the action
+    await FirebaseFirestore.instance.collection('activity_logs').add({
+      'systemId': systemId,
+      'user': FirebaseAuth.instance.currentUser?.email ?? 'Unknown',
+      'message': 'System removed from account',
+      'timestamp': Timestamp.now(),
+    });
   }
 }

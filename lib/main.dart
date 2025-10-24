@@ -12,6 +12,7 @@ import 'pages/login_page.dart';
 import 'pages/register_page.dart';
 import 'pages/homepage.dart';
 import 'pages/system_monitor_page.dart';
+import 'pages/hardware_test_page.dart';
 import 'pages/notifications_page.dart';
 import 'pages/system_selector_page.dart';
 import 'pages/account_page.dart';
@@ -180,6 +181,12 @@ class MyApp extends StatelessWidget {
                   ? SystemMonitorPage(systemId: systemId)
                   : const SystemSelectorPage(),
             );
+          case '/hardware_test':
+            return MaterialPageRoute(
+              builder: (_) => systemId != null
+                  ? HardwareTestPage(systemId: systemId)
+                  : const SystemSelectorPage(),
+            );
           case '/account':
             return MaterialPageRoute(
               builder: (_) => systemId != null
@@ -210,6 +217,9 @@ class _SplashScreenState extends State<SplashScreen>
   late AnimationController _controller;
   bool checking = true;
   bool isConnected = false;
+  int retryCount = 0;
+  int countdown = 5;
+  Timer? _countdownTimer;
 
   @override
   void initState() {
@@ -223,60 +233,198 @@ class _SplashScreenState extends State<SplashScreen>
   }
 
   Future<void> checkConnectivity() async {
-    final result = await Connectivity().checkConnectivity();
-    final hasInternet = result != ConnectivityResult.none;
+    final results = await Connectivity().checkConnectivity();
+    final hasInternet = !results.contains(ConnectivityResult.none);
 
     if (hasInternet) {
       if (mounted) {
         setState(() {
           isConnected = true;
           checking = false;
+          retryCount = 0;
         });
       }
     } else {
+      retryCount++;
       await showNoInternetDialog();
-      if (mounted) {
-        setState(() {
-          isConnected = false;
-          checking = true;
-        });
-      }
-      await Future.delayed(const Duration(seconds: 2));
-      if (mounted) checkConnectivity();
     }
+  }
+
+  void startCountdown() {
+    countdown = 5;
+    _countdownTimer?.cancel();
+    _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      setState(() {
+        countdown--;
+      });
+      if (countdown <= 0) {
+        timer.cancel();
+        Navigator.of(context).pop();
+        checkConnectivity();
+      }
+    });
   }
 
   Future<void> showNoInternetDialog() async {
     if (!mounted) return;
+    startCountdown();
+    
     return showDialog(
       context: context,
       barrierDismissible: false,
-      builder: (_) => AlertDialog(
-        backgroundColor: const Color(0xFF1E2235),
-        title: const Text(
-          "No Internet Connection",
-          style: TextStyle(color: Colors.white),
-        ),
-        content: const Text(
-          "You are not connected to the internet.\nPlease check your connection.",
-          style: TextStyle(color: Colors.grey),
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => exit(0),
-            child: const Text(
-              "Exit",
-              style: TextStyle(color: Colors.redAccent),
+      builder: (_) => StatefulBuilder(
+        builder: (context, setDialogState) {
+          // Update dialog state with countdown
+          _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
+            if (!mounted || countdown <= 0) {
+              timer.cancel();
+              return;
+            }
+            setDialogState(() {
+              countdown--;
+            });
+            if (countdown <= 0) {
+              timer.cancel();
+              if (mounted && Navigator.canPop(context)) {
+                Navigator.of(context).pop();
+                checkConnectivity();
+              }
+            }
+          });
+
+          return WillPopScope(
+            onWillPop: () async => false,
+            child: AlertDialog(
+              backgroundColor: const Color(0xFF1E2235),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(20),
+                side: const BorderSide(color: Colors.redAccent, width: 2),
+              ),
+              title: Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(8),
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent.withOpacity(0.2),
+                      shape: BoxShape.circle,
+                    ),
+                    child: const Icon(
+                      Icons.wifi_off,
+                      color: Colors.redAccent,
+                      size: 28,
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  const Expanded(
+                    child: Text(
+                      "No Internet",
+                      style: TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    "This app requires an internet connection to monitor and control your hardware system.",
+                    style: TextStyle(color: Colors.grey, fontSize: 14),
+                  ),
+                  const SizedBox(height: 16),
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: Colors.amber.withOpacity(0.1),
+                      borderRadius: BorderRadius.circular(8),
+                      border: Border.all(color: Colors.amber.withOpacity(0.3)),
+                    ),
+                    child: Row(
+                      children: [
+                        const Icon(Icons.info_outline, color: Colors.amber, size: 20),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            retryCount == 1
+                                ? "First connection attempt failed"
+                                : "Retry attempt #$retryCount",
+                            style: const TextStyle(color: Colors.amber, fontSize: 12),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Center(
+                    child: Column(
+                      children: [
+                        Text(
+                          "Auto-retry in",
+                          style: TextStyle(color: Colors.grey.shade400, fontSize: 12),
+                        ),
+                        const SizedBox(height: 8),
+                        Container(
+                          width: 60,
+                          height: 60,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            border: Border.all(color: Colors.amber, width: 3),
+                          ),
+                          child: Center(
+                            child: Text(
+                              "$countdown",
+                              style: const TextStyle(
+                                color: Colors.amber,
+                                fontSize: 24,
+                                fontWeight: FontWeight.bold,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              actions: [
+                TextButton.icon(
+                  onPressed: () {
+                    _countdownTimer?.cancel();
+                    exit(0);
+                  },
+                  icon: const Icon(Icons.exit_to_app, size: 18),
+                  label: const Text("Exit App"),
+                  style: TextButton.styleFrom(
+                    foregroundColor: Colors.redAccent,
+                  ),
+                ),
+                ElevatedButton.icon(
+                  onPressed: () {
+                    _countdownTimer?.cancel();
+                    Navigator.of(context).pop();
+                    checkConnectivity();
+                  },
+                  icon: const Icon(Icons.refresh, size: 18),
+                  label: const Text("Retry Now"),
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor: Colors.amber,
+                    foregroundColor: Colors.black87,
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                  ),
+                ),
+              ],
             ),
-          ),
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text(
-              "Try Again",
-              style: TextStyle(color: Colors.amber),
-            ),
-          ),
-        ],
+          );
+        },
       ),
     );
   }
@@ -284,6 +432,7 @@ class _SplashScreenState extends State<SplashScreen>
   @override
   void dispose() {
     _controller.dispose();
+    _countdownTimer?.cancel();
     super.dispose();
   }
 

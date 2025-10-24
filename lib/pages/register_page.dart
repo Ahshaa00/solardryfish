@@ -67,6 +67,10 @@ class _RegisterPageState extends State<RegisterPage> {
       final otp = (1000 + Random().nextInt(9000)).toString();
       final expiresAt = DateTime.now().add(const Duration(minutes: 5));
 
+      print('📧 Registering: $email');
+      print('🔑 Generated OTP: $otp');
+      print('⏰ Expires at: $expiresAt');
+
       await FirebaseFirestore.instance
           .collection('pending_verifications')
           .doc(email)
@@ -77,12 +81,16 @@ class _RegisterPageState extends State<RegisterPage> {
             'expiresAt': Timestamp.fromDate(expiresAt),
           });
 
+      print('✅ OTP saved to Firestore: pending_verifications/$email');
+
       // ✅ Send OTP via EmailJS
       await sendOtpEmail(email, otp);
 
+      print('✅ OTP email sent successfully');
+
       ScaffoldMessenger.of(
         context,
-      ).showSnackBar(SnackBar(content: Text("OTP sent to $email")));
+      ).showSnackBar(SnackBar(content: Text("OTP sent to $email! Check your inbox.")));
 
       if (mounted) {
         Navigator.push(

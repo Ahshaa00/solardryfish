@@ -1,4 +1,5 @@
 import 'package:firebase_database/firebase_database.dart';
+import 'package:firebase_auth/firebase_auth.dart';
 
 class ScheduleService {
   final DatabaseReference systemRef;
@@ -79,17 +80,20 @@ class ScheduleService {
 
   /// 📝 Log system events
   Future<void> log(String message) async {
-    await systemRef.child('logs').push().set({
-      'timestamp': DateTime.now().toIso8601String(),
-      'message': message,
+    await systemRef.child('activityLogs').push().set({
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
+      'action': message,
+      'user': FirebaseAuth.instance.currentUser?.email ?? 'Unknown',
     });
   }
 
   /// 🔔 Send user notifications
   Future<void> notify(String message) async {
     await systemRef.child('notifications').push().set({
-      'timestamp': DateTime.now().toIso8601String(),
+      'timestamp': DateTime.now().millisecondsSinceEpoch,
       'message': message,
+      'type': 'info',
+      'read': false,
     });
   }
 }

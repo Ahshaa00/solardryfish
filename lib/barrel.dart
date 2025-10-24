@@ -19,6 +19,7 @@ export 'pages/account_page.dart';
 export 'pages/code_verification_page.dart';
 export 'pages/email_verification_page.dart';
 export 'pages/forgot_password_page.dart';
+export 'pages/hardware_test_page.dart';
 export 'pages/homepage.dart';
 export 'pages/login_page.dart';
 export 'pages/notifications_page.dart';
@@ -28,6 +29,14 @@ export 'pages/system_monitor_page.dart';
 export 'pages/system_selector_page.dart';
 export 'pages/system_settings_page.dart';
 
+// Services
+export 'services/permission_service.dart';
+export 'services/schedule_service.dart';
+export 'services/notification_service.dart';
+export 'services/registration_code_service.dart';
+export 'services/automation_service.dart';
+export 'services/connection_monitor_service.dart';
+
 // Screens
 export 'screens/activity_log_screen.dart';
 export 'screens/dashboard_screen.dart';
@@ -36,9 +45,6 @@ export 'screens/schedule_screen.dart';
 // Models
 export 'models/user_role.dart';
 export 'models/shared_user.dart';
-
-// Services
-export 'services/permission_service.dart';
 
 // Widgets
 export 'widgets/permission_badge.dart';

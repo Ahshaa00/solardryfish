@@ -17,6 +17,9 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   late final ScheduleService scheduleService;
   UserRole? userRole;
 
+  // 🎬 SCREENSHOT MODE: Set to true to use mock data
+  static const bool USE_MOCK_DATA = true;  // ⚠️ Change to false for real data
+
   final user = FirebaseAuth.instance.currentUser;
   late final String userEmail;
 
@@ -26,10 +29,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   String currentPhase = 'Phase 1';
   int batchCount = 0;
   bool isBatchActive = false;
+  bool isScheduleStarting = false; // NEW: Track when schedule is starting
 
   bool lidOpen = false;
   bool heaterOn = false;
   bool systemOnline = false;
+  int lastUpdateTimestamp = 0;
+  bool isDataStale = false;
 
   double targetTemp = 35.0;
   double targetHum = 50.0;
@@ -52,6 +58,12 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     systemRef = FirebaseDatabase.instance.ref('hardwareSystems/${widget.systemId}');
     scheduleService = ScheduleService(systemRef);
     
+    // 🎬 MOCK DATA: Initialize with perfect screenshot data
+    if (USE_MOCK_DATA) {
+      _initializeMockData();
+      return; // Skip Firebase listeners
+    }
+    
     // Load user role
     _loadUserRole();
 
@@ -62,6 +74,10 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
         setState(() {
           remainingSeconds = val is int ? val : int.tryParse(val.toString()) ?? 0;
           isBatchActive = remainingSeconds > 0;
+          // Clear starting flag when we get actual remaining time
+          if (remainingSeconds > 0) {
+            isScheduleStarting = false;
+          }
         });
       }
     });
@@ -69,7 +85,14 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     // Listen to phase from MEGA
     systemRef.child('status/phase').onValue.listen((event) {
       if (mounted) {
-        setState(() => currentPhase = event.snapshot.value?.toString() ?? 'Idle');
+        final phase = event.snapshot.value?.toString() ?? 'Idle';
+        setState(() {
+          currentPhase = phase;
+          // If phase is not 'Idle', schedule is active
+          if (phase != 'Idle') {
+            isScheduleStarting = false;
+          }
+        });
       }
     });
 
@@ -78,6 +101,28 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       if (mounted) {
         setState(() => systemOnline = event.snapshot.value == true);
       }
+    });
+
+    // Listen to lastUpdate timestamp for stale detection
+    systemRef.child('status/lastUpdate').onValue.listen((event) {
+      if (mounted) {
+        final timestamp = event.snapshot.value;
+        if (timestamp != null) {
+          setState(() {
+            lastUpdateTimestamp = timestamp is int ? timestamp : int.tryParse(timestamp.toString()) ?? 0;
+            _checkDataFreshness();
+          });
+        }
+      }
+    });
+
+    // Check data freshness every 3 seconds
+    Timer.periodic(const Duration(seconds: 3), (timer) {
+      if (!mounted) {
+        timer.cancel();
+        return;
+      }
+      _checkDataFreshness();
     });
 
     scheduleService.listenToSchedule(
@@ -112,8 +157,86 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     );
   }
 
+  // 🎬 MOCK DATA: Initialize perfect data for screenshots
+  void _initializeMockData() {
+    setState(() {
+      // System online and working
+      systemOnline = true;
+      lidOpen = true;
+      heaterOn = true;
+      
+      // Active batch in progress
+      isBatchActive = true;
+      isScheduleStarting = false;
+      currentPhase = 'Phase 1: Drying';
+      remainingSeconds = 5400; // 1h 30m remaining
+      batchCount = 3; // 3 batches completed
+      
+      // Schedule durations (2 hours and 1 hour)
+      phase1Duration = 7200; // 2 hours
+      phase2Duration = 3600; // 1 hour
+      
+      // Target values
+      targetTemp = 35.0;
+      targetHum = 45.0;
+      
+      // Fresh data
+      lastUpdateTimestamp = DateTime.now().millisecondsSinceEpoch;
+      isDataStale = false;
+      
+      // Set text controllers
+      phase1H.text = '2';
+      phase1M.text = '0';
+      phase1S.text = '0';
+      phase2H.text = '1';
+      phase2M.text = '0';
+      phase2S.text = '0';
+      tempController.text = '35.0';
+      humController.text = '45.0';
+    });
+    
+    // Mock user role with full permissions
+    userRole = UserRole.owner;
+    
+    print('🎬 MOCK DATA: Schedule initialized with perfect screenshot data');
+  }
+
+  void _checkDataFreshness() {
+    if (lastUpdateTimestamp == 0) {
+      print('⚠️ Schedule: No timestamp received yet');
+      setState(() => isDataStale = false);
+      return;
+    }
+
+    final now = DateTime.now().millisecondsSinceEpoch;
+    final difference = now - lastUpdateTimestamp;
+
+    print('🔍 Schedule: Last update ${(difference / 1000).toStringAsFixed(1)}s ago | Online: $systemOnline | Stale: ${difference > 120000}');
+
+    // Consider data stale if no update in last 120 seconds (increased for stability)
+    final stale = difference > 120000;
+
+    if (isDataStale != stale) {
+      setState(() {
+        isDataStale = stale;
+        if (stale) {
+          // Data is stale - mark as offline
+          print('❌ Schedule: Marking system as OFFLINE (stale data)');
+          systemOnline = false;
+        } else if (!stale && !systemOnline) {
+          // Data is fresh again - mark as online
+          print('✅ Schedule: Marking system as ONLINE (fresh data)');
+          systemOnline = true;
+        }
+      });
+    }
+  }
+
   Future<void> _loadUserRole() async {
     final role = await PermissionService.getUserRole(widget.systemId);
+    print('🔐 Schedule - User Role: $role');
+    print('🔐 Schedule - Can Schedule: ${role.canSchedule}');
+    print('🔐 Schedule - System ID: ${widget.systemId}');
     if (mounted) {
       setState(() => userRole = role);
     }
@@ -132,7 +255,13 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   // App just displays the remaining time from Firebase
 
   void scheduleNewBatch() {
+    print('🔘 Start Schedule button clicked!');
+    print('🔐 User Role: $userRole');
+    print('🔐 Can Schedule: ${userRole?.canSchedule}');
+    print('🌐 System Online: $systemOnline');
+    
     if (userRole == null || !userRole!.canSchedule) {
+      print('❌ Permission denied: userRole=${userRole}, canSchedule=${userRole?.canSchedule}');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Text("You don't have permission to schedule drying sessions"),
@@ -143,6 +272,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
     }
     
     if (!systemOnline) {
+      print('❌ System offline: Cannot start schedule');
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
           content: Row(
@@ -157,6 +287,8 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       );
       return;
     }
+    
+    print('✅ Starting schedule...');
 
     final p1h = int.tryParse(phase1H.text) ?? 0;
     final p1m = int.tryParse(phase1M.text) ?? 0;
@@ -186,6 +318,76 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
       "Started drying schedule - Phase 1: $phase1Duration sec, Phase 2: $phase2Duration sec, Temp: $temp°C, Humidity: $hum%",
     );
     scheduleService.notify("Drying schedule started");
+    
+    print('✅ Schedule command sent to Firebase');
+    
+    // Set starting flag to show control panel immediately
+    setState(() {
+      isScheduleStarting = true;
+    });
+    
+    // Set a timeout to clear the starting flag if no response
+    Timer(const Duration(seconds: 10), () {
+      if (mounted && isScheduleStarting && remainingSeconds == 0) {
+        print('⚠️ Schedule: Timeout - no response from MEGA, clearing starting flag');
+        setState(() {
+          isScheduleStarting = false;
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('Schedule command sent but no response from system. Please check system status.'),
+            backgroundColor: Colors.orange,
+          ),
+        );
+      }
+    });
+    
+    // Show success dialog
+    if (mounted) {
+      showDialog(
+        context: context,
+        builder: (context) => AlertDialog(
+          backgroundColor: const Color(0xFF1E2235),
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+          title: const Row(
+            children: [
+              Icon(Icons.check_circle, color: Colors.green, size: 32),
+              SizedBox(width: 12),
+              Text('Schedule Started', style: TextStyle(color: Colors.white)),
+            ],
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                'Drying schedule has been started successfully!',
+                style: const TextStyle(color: Colors.white70),
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'Phase 1: ${(phase1Duration / 3600).toStringAsFixed(1)} hours',
+                style: const TextStyle(color: Colors.amber, fontSize: 14),
+              ),
+              Text(
+                'Phase 2: ${(phase2Duration / 3600).toStringAsFixed(1)} hours',
+                style: const TextStyle(color: Colors.amber, fontSize: 14),
+              ),
+              Text(
+                'Target: $temp°C, $hum%',
+                style: const TextStyle(color: Colors.amber, fontSize: 14),
+              ),
+            ],
+          ),
+          actions: [
+            TextButton(
+              onPressed: () => Navigator.pop(context),
+              child: const Text('OK', style: TextStyle(color: Colors.amber)),
+            ),
+          ],
+        ),
+      );
+    }
   }
 
   void stopDryingSession() {
@@ -277,7 +479,7 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsets.all(16),
-      child: isBatchActive ? _buildControlPanel() : _buildScheduler(),
+      child: (isBatchActive || isScheduleStarting) ? _buildControlPanel() : _buildScheduler(),
     );
   }
 
@@ -486,34 +688,49 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
           ),
           child: Column(
             children: [
-              const Text(
-                'Time Remaining',
-                style: TextStyle(
+              Text(
+                isScheduleStarting ? 'Starting Schedule...' : 'Time Remaining',
+                style: const TextStyle(
                   fontSize: 16,
                   color: Colors.black54,
                   fontWeight: FontWeight.w500,
                 ),
               ),
               const SizedBox(height: 8),
-              Text(
-                formatTime(remainingSeconds),
-                style: const TextStyle(
-                  fontSize: 48,
-                  fontWeight: FontWeight.bold,
-                  color: Colors.black87,
-                  letterSpacing: 2,
+              if (isScheduleStarting) ...[
+                const CircularProgressIndicator(
+                  valueColor: AlwaysStoppedAnimation<Color>(Colors.black87),
                 ),
-              ),
-              const SizedBox(height: 16),
-              ClipRRect(
-                borderRadius: BorderRadius.circular(10),
-                child: LinearProgressIndicator(
-                  value: getProgress(),
-                  minHeight: 10,
-                  backgroundColor: Colors.black26,
-                  valueColor: const AlwaysStoppedAnimation<Color>(Colors.black87),
+                const SizedBox(height: 16),
+                const Text(
+                  'Please wait while the system initializes...',
+                  style: TextStyle(
+                    fontSize: 14,
+                    color: Colors.black54,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
-              ),
+              ] else ...[
+                Text(
+                  formatTime(remainingSeconds),
+                  style: const TextStyle(
+                    fontSize: 48,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.black87,
+                    letterSpacing: 2,
+                  ),
+                ),
+                const SizedBox(height: 16),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: LinearProgressIndicator(
+                    value: getProgress(),
+                    minHeight: 10,
+                    backgroundColor: Colors.black26,
+                    valueColor: const AlwaysStoppedAnimation<Color>(Colors.black87),
+                  ),
+                ),
+              ],
             ],
           ),
         ),

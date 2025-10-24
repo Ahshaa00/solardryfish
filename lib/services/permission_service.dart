@@ -10,11 +10,17 @@ class PermissionService {
   /// Get the current user's role for a specific system
   static Future<UserRole> getUserRole(String systemId) async {
     final user = FirebaseAuth.instance.currentUser;
-    if (user == null) return UserRole.viewer;
+    if (user == null) {
+      print('🔐 PermissionService: No user logged in');
+      return UserRole.viewer;
+    }
 
     try {
+      print('🔐 PermissionService: Checking role for user ${user.email} on system $systemId');
+      
       // 🔧 TESTING: Super admin has owner access to all systems
       if (user.email?.toLowerCase() == superAdminEmail) {
+        print('🔐 PermissionService: Super admin detected → Owner');
         return UserRole.owner;
       }
       
@@ -22,7 +28,11 @@ class PermissionService {
       
       // Check if user is the owner
       final ownerSnapshot = await systemRef.child('ownerId').get();
+      print('🔐 PermissionService: Owner ID from Firebase: ${ownerSnapshot.value}');
+      print('🔐 PermissionService: Current user UID: ${user.uid}');
+      
       if (ownerSnapshot.value == user.uid) {
+        print('🔐 PermissionService: User is owner → Owner role');
         return UserRole.owner;
       }
 
@@ -30,15 +40,17 @@ class PermissionService {
       final sharedSnapshot = await systemRef.child('sharedWith/${user.uid}/role').get();
       if (sharedSnapshot.exists) {
         final roleString = sharedSnapshot.value as String?;
+        print('🔐 PermissionService: User in sharedWith list → Role: $roleString');
         if (roleString != null) {
           return UserRoleExtension.fromString(roleString);
         }
       }
 
       // User has no access
+      print('🔐 PermissionService: No access found → Viewer role');
       return UserRole.viewer;
     } catch (e) {
-      print('Error getting user role: $e');
+      print('❌ Error getting user role: $e');
       return UserRole.viewer;
     }
   }

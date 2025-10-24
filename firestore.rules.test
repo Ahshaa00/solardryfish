@@ -1,0 +1,53 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    
+    // TEMPORARY TEST RULES - VERY PERMISSIVE
+    // Use this to test if rules deployment is working
+    
+    match /pending_verifications/{email} {
+      allow read, write: if true; // Allow everything for testing
+    }
+    
+    match /password_resets/{email} {
+      allow read, write: if true;
+    }
+    
+    match /registration_codes/{codeId} {
+      allow read, write: if true;
+    }
+    
+    match /userAccess/{uid} {
+      allow read, write: if true;
+    }
+    
+    match /user_notifications/{uid} {
+      allow read, write: if true;
+    }
+    
+    match /systems/{systemId} {
+      allow read, write: if true;
+    }
+    
+    match /system_stats/{systemId} {
+      allow read, write: if true;
+    }
+    
+    match /activity_logs/{logId} {
+      allow read, write: if true;
+    }
+    
+    match /system_status_logs/{logId} {
+      allow read, write: if true;
+    }
+    
+    match /batch_logs/{batchId} {
+      allow read, write: if true;
+    }
+    
+    // Deny everything else
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

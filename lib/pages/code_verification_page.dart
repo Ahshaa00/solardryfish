@@ -49,19 +49,31 @@ class _CodeVerificationPageState extends State<CodeVerificationPage> {
       // Registration Flow Only
       final docRef = FirebaseFirestore.instance.collection('pending_verifications').doc(email);
 
+      print('🔍 Fetching OTP record for: $email');
       final doc = await docRef.get();
-      if (!doc.exists) throw "No OTP record found.";
+      
+      if (!doc.exists) {
+        print('❌ No OTP record found for: $email');
+        throw "No OTP record found. Please request a new code.";
+      }
 
       final data = doc.data()!;
-      final correctOtp = data['otp'];
-      final expiresAt = (data['expiresAt'] as Timestamp).toDate();
+      final correctOtp = data['otp']?.toString() ?? '';
+      final expiresAt = (data['expiresAt'] as Timestamp?)?.toDate();
 
-      if (DateTime.now().isAfter(expiresAt)) {
+      print('✅ OTP record found. Correct OTP: $correctOtp, Entered: $enteredOtp');
+
+      if (expiresAt != null && DateTime.now().isAfter(expiresAt)) {
         await docRef.delete();
         throw "OTP has expired. Please request a new one.";
       }
 
-      if (enteredOtp != correctOtp) throw "Incorrect OTP.";
+      if (enteredOtp != correctOtp) {
+        print('❌ OTP mismatch. Expected: $correctOtp, Got: $enteredOtp');
+        throw "Incorrect OTP. Please try again.";
+      }
+
+      print('✅ OTP verified successfully!');
 
       // ✅ Create account using password from memory (not from Firestore)
       final password = widget.password;
@@ -100,38 +112,116 @@ class _CodeVerificationPageState extends State<CodeVerificationPage> {
 
         await docRef.delete();
 
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text("Account created! Please verify your email."),
-            backgroundColor: Colors.green,
-          ),
-        );
+        print('✅ Account created and signed in successfully!');
 
+        // ✅ Don't navigate manually - let AuthWrapper handle it
+        // The authStateChanges() stream will automatically redirect to SystemSelectorPage
+        
         if (mounted) {
-          // ✅ Will redirect to EmailVerificationPage via AuthWrapper
-          Navigator.pushReplacement(
-            context,
-            MaterialPageRoute(builder: (_) => const EmailVerificationPage()),
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Account created successfully! Welcome!"),
+              backgroundColor: Colors.green,
+              duration: Duration(seconds: 2),
+            ),
           );
+          
+          // Wait a moment for the snackbar to show, then AuthWrapper takes over
+          await Future.delayed(const Duration(milliseconds: 500));
         }
       } on FirebaseAuthException catch (e) {
         if (e.code == 'email-already-in-use') {
-          await docRef.delete();
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(
-              content: Text("Email is already registered. Please log in."),
-            ),
-          );
+          print('⚠️ Email already in use, attempting to sign in...');
+          
+          try {
+            // Try to delete OTP record
+            await docRef.delete().catchError((e) => print('OTP delete failed: $e'));
+            
+            // Sign in with existing account
+            await FirebaseAuth.instance.signInWithEmailAndPassword(
+              email: email,
+              password: widget.password,
+            );
+            
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                const SnackBar(
+                  content: Text("Account already exists. Signing you in..."),
+                  backgroundColor: Colors.orange,
+                ),
+              );
+              
+              // Wait for AuthWrapper to handle navigation
+              await Future.delayed(const Duration(milliseconds: 500));
+            }
+          } catch (signInError) {
+            if (mounted) {
+              ScaffoldMessenger.of(context).showSnackBar(
+                SnackBar(
+                  content: Text("Email already registered. Please log in. Error: $signInError"),
+                  backgroundColor: Colors.red,
+                ),
+              );
+              
+              // Navigate to login page
+              Navigator.pushAndRemoveUntil(
+                context,
+                MaterialPageRoute(builder: (_) => const LoginPage()),
+                (route) => false,
+              );
+            }
+          }
         } else {
           rethrow;
         }
       }
     } catch (e) {
-      ScaffoldMessenger.of(
-        context,
-      ).showSnackBar(SnackBar(content: Text("Verification failed: $e")));
+      print('❌ Verification error: $e');
+      
+      // Check if user is already signed in despite the error
+      final currentUser = FirebaseAuth.instance.currentUser;
+      
+      if (currentUser != null) {
+        print('✅ User is signed in despite error. Redirecting...');
+        
+        if (mounted) {
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(
+              content: Text("Account created! Some profile data may be incomplete. Please deploy database rules."),
+              backgroundColor: Colors.orange,
+              duration: Duration(seconds: 3),
+            ),
+          );
+          
+          // Wait for snackbar, then let AuthWrapper redirect
+          await Future.delayed(const Duration(milliseconds: 1000));
+        }
+      } else {
+        // User not signed in, show error
+        if (mounted) {
+          // Check if it's a permission error
+          if (e.toString().contains('permission') || e.toString().contains('PERMISSION_DENIED')) {
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(
+                content: Text("Database rules not deployed! Deploy both Firestore AND Realtime Database rules."),
+                backgroundColor: Colors.red,
+                duration: Duration(seconds: 5),
+              ),
+            );
+          } else {
+            ScaffoldMessenger.of(context).showSnackBar(
+              SnackBar(
+                content: Text("Verification failed: $e"),
+                backgroundColor: Colors.red,
+              ),
+            );
+          }
+        }
+      }
     } finally {
-      setState(() => loading = false);
+      if (mounted) {
+        setState(() => loading = false);
+      }
     }
   }
 

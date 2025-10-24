@@ -1,5 +1,6 @@
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import '../barrel.dart';
+import 'notification_test_page.dart';
 
 class NotificationsPage extends StatefulWidget {
   final String systemId;
@@ -44,6 +45,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                   'timestamp': value['timestamp'] ?? 0,
                   'type': value['type']?.toString() ?? 'info',
                   'systemId': value['systemId']?.toString() ?? '',
+                  'isTest': value['isTest'] == true,
                 };
               }
               return {
@@ -52,6 +54,7 @@ class _NotificationsPageState extends State<NotificationsPage> {
                 'timestamp': 0,
                 'type': 'info',
                 'systemId': '',
+                'isTest': false,
               };
             })
             .toList();
@@ -128,6 +131,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
     }
   }
 
+  Future<void> deleteNotification(String notificationId) async {
+    await notifRef.child(notificationId).remove();
+    if (mounted) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('Notification deleted'),
+          backgroundColor: Colors.green,
+          duration: Duration(seconds: 1),
+        ),
+      );
+    }
+  }
+
   Future<void> clearAllNotifications() async {
     final confirmed = await showDialog<bool>(
       context: context,
@@ -185,6 +201,19 @@ class _NotificationsPageState extends State<NotificationsPage> {
           onPressed: () => Navigator.pop(context),
         ),
         actions: [
+          // TEST: Notification Test Button (Remove before production)
+          IconButton(
+            icon: const Icon(Icons.bug_report, color: Colors.orange),
+            onPressed: () {
+              Navigator.push(
+                context,
+                MaterialPageRoute(
+                  builder: (context) => NotificationTestPage(systemId: widget.systemId),
+                ),
+              );
+            },
+            tooltip: 'Test Notifications',
+          ),
           if (notifications.isNotEmpty)
             IconButton(
               icon: const Icon(Icons.delete_sweep, color: Colors.red),
@@ -265,12 +294,18 @@ class _NotificationsPageState extends State<NotificationsPage> {
                           Container(
                             padding: const EdgeInsets.all(10),
                             decoration: BoxDecoration(
-                              color: Colors.amber.withOpacity(0.2),
+                              color: (notifications[index]['isTest'] == true 
+                                  ? Colors.orange 
+                                  : Colors.amber).withOpacity(0.2),
                               borderRadius: BorderRadius.circular(10),
                             ),
-                            child: const Icon(
-                              Icons.notifications_active,
-                              color: Colors.amber,
+                            child: Icon(
+                              notifications[index]['isTest'] == true 
+                                  ? Icons.bug_report 
+                                  : Icons.notifications_active,
+                              color: notifications[index]['isTest'] == true 
+                                  ? Colors.orange 
+                                  : Colors.amber,
                               size: 24,
                             ),
                           ),
@@ -303,10 +338,37 @@ class _NotificationsPageState extends State<NotificationsPage> {
                                         fontSize: 12,
                                       ),
                                     ),
+                                    if (notifications[index]['isTest'] == true) ...[
+                                      const SizedBox(width: 8),
+                                      Container(
+                                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                        decoration: BoxDecoration(
+                                          color: Colors.orange.withOpacity(0.2),
+                                          borderRadius: BorderRadius.circular(4),
+                                          border: Border.all(color: Colors.orange, width: 1),
+                                        ),
+                                        child: const Text(
+                                          'TEST',
+                                          style: TextStyle(
+                                            color: Colors.orange,
+                                            fontSize: 10,
+                                            fontWeight: FontWeight.bold,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
                                   ],
                                 ),
                               ],
                             ),
+                          ),
+                          const SizedBox(width: 8),
+                          IconButton(
+                            icon: const Icon(Icons.delete_outline, color: Colors.red),
+                            onPressed: () => deleteNotification(notifications[index]['id'] as String),
+                            tooltip: 'Delete',
+                            padding: EdgeInsets.zero,
+                            constraints: const BoxConstraints(),
                           ),
                         ],
                       ),

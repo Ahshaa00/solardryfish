@@ -42,6 +42,11 @@
         "fcmToken": {
           ".read": "auth != null && auth.uid === $uid",
           ".write": "auth != null && auth.uid === $uid"
+        },
+        
+        "testNotificationHistory": {
+          ".read": "auth != null && auth.uid === $uid",
+          ".write": "auth != null && auth.uid === $uid"
         }
       }
     },
@@ -51,8 +56,8 @@
       ".write": false,
       
       "$systemId": {
-        ".read": "auth == null || (auth != null && (!data.child('ownerId').exists() || data.child('ownerId').val() === auth.uid || data.child('sharedWith').child(auth.uid).exists() || auth.token.email === 'admin@mail.com'))",
-        ".write": "auth == null || (auth != null && (!data.child('ownerId').exists() || data.child('ownerId').val() === auth.uid || data.child('sharedWith').child(auth.uid).exists() || auth.token.email === 'admin@mail.com'))",
+        ".read": "auth != null && (!data.child('ownerId').exists() || data.child('ownerId').val() === auth.uid || data.child('sharedWith').child(auth.uid).exists() || auth.token.email === 'admin@mail.com')",
+        ".write": "auth != null && (!data.child('ownerId').exists() || data.child('ownerId').val() === auth.uid || data.child('sharedWith').child(auth.uid).child('role').val() === 'admin' || auth.token.email === 'admin@mail.com')",
 
         "ownerId": {
           ".validate": "newData.isString()"
@@ -115,7 +120,7 @@
 
         "status": {
           ".read": "true",
-          ".write": "auth == null || (auth != null && root.child('hardwareSystems').child($systemId).child('ownerId').val() === auth.uid)",
+          ".write": "true",
           
           "online": {
             ".validate": "newData.isBoolean()"
@@ -156,8 +161,8 @@
         },
 
         "sensors": {
-          ".read": "auth == null || (auth != null && root.child('hardwareSystems').child($systemId).child('ownerId').val() === auth.uid)",
-          ".write": "auth == null || (auth != null && root.child('hardwareSystems').child($systemId).child('ownerId').val() === auth.uid)",
+          ".read": "true",
+          ".write": "true",
           
           "temperature": {
             ".validate": "newData.isNumber()"
@@ -171,7 +176,7 @@
         },
 
         "controls": {
-          ".read": "auth == null || (auth != null && (root.child('hardwareSystems').child($systemId).child('ownerId').val() === auth.uid || root.child('hardwareSystems').child($systemId).child('sharedWith').child(auth.uid).exists() || auth.token.email === 'admin@mail.com'))",
+          ".read": "auth != null && (root.child('hardwareSystems').child($systemId).child('ownerId').val() === auth.uid || root.child('hardwareSystems').child($systemId).child('sharedWith').child(auth.uid).exists() || auth.token.email === 'admin@mail.com')",
           ".write": "auth != null && (root.child('hardwareSystems').child($systemId).child('ownerId').val() === auth.uid || root.child('hardwareSystems').child($systemId).child('sharedWith').child(auth.uid).child('role').val() === 'admin' || root.child('hardwareSystems').child($systemId).child('sharedWith').child(auth.uid).child('role').val() === 'operator' || auth.token.email === 'admin@mail.com')",
           
           "fan": {
@@ -189,7 +194,7 @@
         },
 
         "schedule": {
-          ".read": "auth == null || (auth != null && (root.child('hardwareSystems').child($systemId).child('ownerId').val() === auth.uid || root.child('hardwareSystems').child($systemId).child('sharedWith').child(auth.uid).exists() || auth.token.email === 'admin@mail.com'))",
+          ".read": "auth != null && (root.child('hardwareSystems').child($systemId).child('ownerId').val() === auth.uid || root.child('hardwareSystems').child($systemId).child('sharedWith').child(auth.uid).exists() || auth.token.email === 'admin@mail.com')",
           ".write": "auth != null && (root.child('hardwareSystems').child($systemId).child('ownerId').val() === auth.uid || root.child('hardwareSystems').child($systemId).child('sharedWith').child(auth.uid).child('role').val() === 'admin' || root.child('hardwareSystems').child($systemId).child('sharedWith').child(auth.uid).child('role').val() === 'operator' || auth.token.email === 'admin@mail.com')",
           
           "enabled": {
@@ -207,8 +212,8 @@
         },
 
         "notifications": {
-          ".read": "auth == null || (auth != null && root.child('hardwareSystems').child($systemId).child('ownerId').val() === auth.uid)",
-          ".write": "auth == null || (auth != null && root.child('hardwareSystems').child($systemId).child('ownerId').val() === auth.uid)",
+          ".read": "auth != null && (root.child('hardwareSystems').child($systemId).child('ownerId').val() === auth.uid || root.child('hardwareSystems').child($systemId).child('sharedWith').child(auth.uid).exists() || auth.token.email === 'admin@mail.com')",
+          ".write": "auth != null",
           
           "$notificationId": {
             ".validate": "newData.hasChildren(['message', 'timestamp', 'type'])",
@@ -229,8 +234,8 @@
         },
 
         "batchLogs": {
-          ".read": "auth == null || (auth != null && root.child('hardwareSystems').child($systemId).child('ownerId').val() === auth.uid)",
-          ".write": "auth == null || (auth != null && root.child('hardwareSystems').child($systemId).child('ownerId').val() === auth.uid)",
+          ".read": "auth != null && (root.child('hardwareSystems').child($systemId).child('ownerId').val() === auth.uid || root.child('hardwareSystems').child($systemId).child('sharedWith').child(auth.uid).exists())",
+          ".write": "true",
           
           "$batchId": {
             "startTime": {
